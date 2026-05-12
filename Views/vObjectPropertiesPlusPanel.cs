@@ -89,7 +89,6 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
   private List<RhinoObject> _allSelectedObjects = new();
   private Guid _focusedObjectId = Guid.Empty;
   private bool _isUpdatingUi;
-  private bool _applyingAttributes;
   private long _lastUserEditMs;
   private uint _unitPrefsLoadedDocSerial;
 
@@ -330,20 +329,27 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
       && objectList.Count == 1
       && objectList[0].Id == _focusedObjectId;
 
-    // When Rhino fires a full-selection UpdatePage callback mid-apply (due to ModifyAttributes
-    // raising doc events), redirect to the focused-object path so focus state is preserved.
-    if (!isFocusDrillDown && _applyingAttributes && _focusedObjectId != Guid.Empty)
+    // If the incoming selection set matches the recorded full selection, this is a
+    // Rhino-internal refresh (e.g. after ModifyAttributes / geometry replace), not a
+    // user-initiated selection change.  Preserve focus by redirecting to the focused path.
+    if (!isFocusDrillDown && _focusedObjectId != Guid.Empty)
     {
-      var freshFocused = objectList.FirstOrDefault(o => o.Id == _focusedObjectId);
-      if (freshFocused != null)
+      bool isSameSelectionSet = objectList.Count == _allSelectedObjects.Count
+        && objectList.All(o => _allSelectedObjects.Any(a => a.Id == o.Id));
+      if (isSameSelectionSet)
       {
-        UpdateFromSelection(doc, new[] { freshFocused });
-        return;
+        var freshFocused = objectList.FirstOrDefault(o => o.Id == _focusedObjectId);
+        if (freshFocused != null)
+        {
+          UpdateFromSelection(doc, new[] { freshFocused });
+          return;
+        }
       }
     }
 
     if (!isFocusDrillDown)
     {
+      bool wasHighlighting = _focusHighlightConduit.Enabled;
       _allSelectedObjects = objectList;
       _focusedObjectId = Guid.Empty;
       _selectedObjectIds.Clear();
@@ -351,6 +357,8 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
         _selectedObjectIds.Add(o.Id);
       _focusHighlightConduit.Clear();
       _focusHighlightConduit.Enabled = false;
+      if (wasHighlighting)
+        doc?.Views.Redraw();
     }
     else
     {
@@ -617,8 +625,8 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
 
     if (hasEllipse)
     {
-      _radiusBox.Enabled = false;
-      _diameterBox.Enabled = false;
+      _radiusBox.Enabled = true;
+      _diameterBox.Enabled = true;
 
       var displayA = ellipseAxes.Select(e => ConvertLength(e.a, modelUnits, radiusUnits)).ToList();
       var displayB = ellipseAxes.Select(e => ConvertLength(e.b, modelUnits, diameterUnits)).ToList();
@@ -1090,7 +1098,6 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
       return;
 
     _lastUserEditMs = System.Environment.TickCount64;
-    _applyingAttributes = true;
     uint undoRecord = _doc.BeginUndoRecord("Object+ Attributes");
     bool changed = false;
     try
@@ -1106,7 +1113,6 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
     {
       if (undoRecord != 0)
         _doc.EndUndoRecord(undoRecord);
-      _applyingAttributes = false;
     }
 
     if (changed)
@@ -2090,6 +2096,70 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
     return list;
   }
 
+  private bool IsEllipseOnlySelection(out List<(Guid id, Ellipse ellipse)> ellipses)
+  {
+    ellipses = new List<(Guid id, Ellipse ellipse)>();
+    foreach (var obj in SelectedRhinoObjects())
+    {
+      if (obj.Geometry is not Curve curve)
+        return false;
+      // Circles satisfy TryGetEllipse too; exclude them.
+      if (curve.TryGetCircle(out _))
+        return false;
+      if (!curve.TryGetEllipse(out Ellipse e))
+        return false;
+      ellipses.Add((obj.Id, e));
+    }
+    return ellipses.Count > 0;
+  }
+
+  private void ApplyEllipseAxisToSelection(double newValue, bool isMajorAxis)
+  {
+    if (_isUpdatingUi || _doc == null)
+      return;
+    if (newValue <= RhinoMath.ZeroTolerance)
+      return;
+    if (!IsEllipseOnlySelection(out var ellipses))
+      return;
+
+    uint undoRecord = _doc.BeginUndoRecord("Object+ Ellipse Axis");
+    bool changed = false;
+    try
+    {
+      foreach (var (id, ellipse) in ellipses)
+      {
+        double newRadius1, newRadius2;
+        if (isMajorAxis)
+        {
+          // Major axis = max(Radius1, Radius2)
+          newRadius1 = (ellipse.Radius1 >= ellipse.Radius2) ? newValue : ellipse.Radius1;
+          newRadius2 = (ellipse.Radius1 < ellipse.Radius2) ? newValue : ellipse.Radius2;
+        }
+        else
+        {
+          // Minor axis = min(Radius1, Radius2)
+          newRadius1 = (ellipse.Radius1 < ellipse.Radius2) ? newValue : ellipse.Radius1;
+          newRadius2 = (ellipse.Radius1 >= ellipse.Radius2) ? newValue : ellipse.Radius2;
+        }
+        var newEllipse = new Ellipse(ellipse.Plane, newRadius1, newRadius2);
+        var newCurve = newEllipse.ToNurbsCurve();
+        if (newCurve != null)
+          changed |= _doc.Objects.Replace(id, newCurve);
+      }
+    }
+    finally
+    {
+      if (undoRecord != 0)
+        _doc.EndUndoRecord(undoRecord);
+    }
+
+    if (changed)
+    {
+      _doc.Views.Redraw();
+      RefreshFromCurrentSelection();
+    }
+  }
+
   private bool IsPolygonOnlySelection(out List<(Guid id, int sides, Point3d center, Vector3d firstVertexDir, Vector3d normal, double circumRadius)> polygons)
   {
     polygons = SelectedPolygons();
@@ -2284,6 +2354,12 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
       return;
     }
 
+    if (IsEllipseOnlySelection(out _))
+    {
+      ApplyEllipseAxisToSelection(radius, isMajorAxis: true);
+      return;
+    }
+
     ApplyCircularRadiusToSelection(radius);
   }
 
@@ -2307,6 +2383,12 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
       double apothem = diameter;
       double circumR = apothem / Math.Cos(Math.PI / polygons[0].sides);
       ApplyPolygonCircumRadiusToSelection(circumR);
+      return;
+    }
+
+    if (IsEllipseOnlySelection(out _))
+    {
+      ApplyEllipseAxisToSelection(diameter, isMajorAxis: false);
       return;
     }
 
