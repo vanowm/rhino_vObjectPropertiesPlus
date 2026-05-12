@@ -1,0 +1,71 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net7.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <AssemblyName>vObjectPropertiesPlus</AssemblyName>
+    <Product>vObjectProperties+</Product>
+    <Title>vObjectProperties+</Title>
+    <RootNamespace>vObjectPropertiesPlus</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Version>26.5.12.859</Version>
+    <InformationalVersion>26.5.12.859</InformationalVersion>
+    <AssemblyVersion>26.5.12.859</AssemblyVersion>
+    <FileVersion>26.5.12.859</FileVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App" />
+
+    <Reference Include="RhinoCommon">
+      <HintPath>$(ProgramFiles)\Rhino 8\System\RhinoCommon.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Eto">
+      <HintPath>$(ProgramFiles)\Rhino 8\System\Eto.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="vObjectPropertiesPlus.png">
+      <LogicalName>vObjectPropertiesPlus.png</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="vObjectPropertiesPlus.bmp">
+      <LogicalName>vObjectPropertiesPlus.bmp</LogicalName>
+    </EmbeddedResource>
+
+    <Content Include="vObjectPropertiesPlus.svg">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="vObjectPropertiesPlus.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="vObjectPropertiesPlus.bmp">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\icons\rhino_svgs\Layer.svg" Link="rhino_svgs\Layer.svg">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\icons\rhino_svgs\Block.svg" Link="rhino_svgs\Block.svg">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\icons\rhino_svgs\Render_Tools_Materials_Panel.svg" Link="rhino_svgs\Render_Tools_Materials_Panel.svg">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\icons\rhino_svgs\Display_Display_Panel.svg" Link="rhino_svgs\Display_Display_Panel.svg">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <Target Name="CopyVersionedPluginArtifact" AfterTargets="Build">
+    <PropertyGroup>
+      <ArtifactTimestamp>$([System.DateTime]::Now.ToString('yy.MM.dd.HHmmss'))</ArtifactTimestamp>
+    </PropertyGroup>
+    <Copy
+      SourceFiles="$(TargetPath)"
+      DestinationFiles="$(TargetDir)$(AssemblyName).$(ArtifactTimestamp)$(TargetExt)"
+      SkipUnchangedFiles="true" />
+  </Target>
+</Project>
