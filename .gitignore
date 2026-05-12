@@ -1,5 +1,28 @@
-bin/
+# Build outputs
+bin/*
 obj/
+
+# Keep the release plugin binary under source control.
+!bin/Release/
+bin/Release/*
+!bin/Release/net7.0-windows/
+bin/Release/net7.0-windows/*
+!bin/Release/net7.0-windows/vObjectPropertiesPlus.dll
+
+# User/IDE files
 .vs/
 *.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Logs and local runtime output
 logs/
+*.log
+
+# Backup artifacts
+backups/
+
+# OS files
+Thumbs.db
+Desktop.ini

@@ -62,10 +62,12 @@
   <Target Name="CopyVersionedPluginArtifact" AfterTargets="Build">
     <PropertyGroup>
       <ArtifactTimestamp>$([System.DateTime]::Now.ToString('yy.MM.dd.HHmmss'))</ArtifactTimestamp>
+      <BackupsDir>$(TargetDir)backups\</BackupsDir>
     </PropertyGroup>
+    <MakeDir Directories="$(BackupsDir)" />
     <Copy
       SourceFiles="$(TargetPath)"
-      DestinationFiles="$(TargetDir)$(AssemblyName).$(ArtifactTimestamp)$(TargetExt)"
+      DestinationFiles="$(BackupsDir)$(AssemblyName).$(ArtifactTimestamp)$(TargetExt)"
       SkipUnchangedFiles="true" />
   </Target>
 </Project>
