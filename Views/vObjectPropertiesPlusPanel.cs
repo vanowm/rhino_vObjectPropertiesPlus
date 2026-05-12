@@ -87,6 +87,7 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
   private List<RhinoObject> _allSelectedObjects = new();
   private Guid _focusedObjectId = Guid.Empty;
   private bool _isUpdatingUi;
+  private bool _applyingAttributes;
   private long _lastUserEditMs;
   private uint _unitPrefsLoadedDocSerial;
 
@@ -323,6 +324,18 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
       && objectList.Count == 1
       && objectList[0].Id == _focusedObjectId;
 
+    // When Rhino fires a full-selection UpdatePage callback mid-apply (due to ModifyAttributes
+    // raising doc events), redirect to the focused-object path so focus state is preserved.
+    if (!isFocusDrillDown && _applyingAttributes && _focusedObjectId != Guid.Empty)
+    {
+      var freshFocused = objectList.FirstOrDefault(o => o.Id == _focusedObjectId);
+      if (freshFocused != null)
+      {
+        UpdateFromSelection(doc, new[] { freshFocused });
+        return;
+      }
+    }
+
     if (!isFocusDrillDown)
     {
       _allSelectedObjects = objectList;
@@ -427,6 +440,8 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
     var circularRadii = new List<double>();
     int circleCount = 0;
     int arcCount = 0;
+    var ellipseAxes = new List<(double a, double b)>();
+    int ellipseCount = 0;
     var rectangleSizes = new List<(double width, double height)>();
     double rectangleDistanceTolerance = Math.Max((doc?.ModelAbsoluteTolerance ?? RhinoMath.SqrtEpsilon) * 2.0, 1e-8);
     double rectangleAngleToleranceRadians = RhinoMath.ToRadians(2.0);
@@ -448,6 +463,13 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
         circularRadii.Add(arc.Radius);
         arcCount++;
       }
+      else if (curve.TryGetEllipse(out Ellipse ellipse))
+      {
+        double a = Math.Max(ellipse.Radius1, ellipse.Radius2);
+        double b = Math.Min(ellipse.Radius1, ellipse.Radius2);
+        ellipseAxes.Add((a, b));
+        ellipseCount++;
+      }
 
       if (TryGetRectangleDimensions(curve, rectangleDistanceTolerance, rectangleAngleToleranceRadians, horizontalReference, out double rectWidth, out double rectHeight))
         rectangleSizes.Add((rectWidth, rectHeight));
@@ -466,9 +488,11 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
     bool hasCircle = circleCount > 0;
     bool hasArc = arcCount > 0;
     bool hasCircular = hasCircle || hasArc;
+    bool hasEllipse = ellipseCount > 0 && !hasCircular;
 
     bool hasRectangleOnly = !hasSegmentSelection
       && !hasCircular
+      && !hasEllipse
       && curveCount > 0
       && rectangleSizes.Count == curveCount
       && objectList.All(o => o.Geometry is Curve);
@@ -480,13 +504,18 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
       _radiusNameLabel.Text = "Width";
       _diameterNameLabel.Text = "Height";
     }
+    else if (hasEllipse)
+    {
+      _radiusNameLabel.Text = "A";
+      _diameterNameLabel.Text = "B";
+    }
     else
     {
       _radiusNameLabel.Text = "Radius";
       _diameterNameLabel.Text = "Diameter";
     }
 
-    bool showSecondaryMetrics = hasCircular || hasRectangleOnly;
+    bool showSecondaryMetrics = hasCircular || hasRectangleOnly || hasEllipse;
     _radiusNameLabel.Visible = showSecondaryMetrics;
     _radiusBox.Visible = showSecondaryMetrics;
     _radiusUnitDrop.Visible = showSecondaryMetrics;
@@ -551,6 +580,24 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
 
       SetEditableTextValue(_radiusBox, widthsSame ? FormatInfoNumber(displayWidths[0], _radiusUnitDrop) : VariesText);
       SetEditableTextValue(_diameterBox, heightsSame ? FormatInfoNumber(displayHeights[0], _diameterUnitDrop) : VariesText);
+      EnsureSegmentReadOnlyInfoBoxesAreSelectable(hasSegmentSelection);
+      RefreshRectangleSideHighlight();
+      return;
+    }
+
+    if (hasEllipse)
+    {
+      _radiusBox.Enabled = false;
+      _diameterBox.Enabled = false;
+
+      var displayA = ellipseAxes.Select(e => ConvertLength(e.a, modelUnits, radiusUnits)).ToList();
+      var displayB = ellipseAxes.Select(e => ConvertLength(e.b, modelUnits, diameterUnits)).ToList();
+
+      bool aSame = displayA.All(v => RhinoMath.EpsilonEquals(v, displayA[0], RhinoMath.SqrtEpsilon));
+      bool bSame = displayB.All(v => RhinoMath.EpsilonEquals(v, displayB[0], RhinoMath.SqrtEpsilon));
+
+      SetEditableTextValue(_radiusBox, aSame ? FormatInfoNumber(displayA[0], _radiusUnitDrop) : VariesText);
+      SetEditableTextValue(_diameterBox, bSame ? FormatInfoNumber(displayB[0], _diameterUnitDrop) : VariesText);
       EnsureSegmentReadOnlyInfoBoxesAreSelectable(hasSegmentSelection);
       RefreshRectangleSideHighlight();
       return;
@@ -982,7 +1029,7 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
       return;
 
     _lastUserEditMs = System.Environment.TickCount64;
-
+    _applyingAttributes = true;
     uint undoRecord = _doc.BeginUndoRecord("Object+ Attributes");
     bool changed = false;
     try
@@ -998,6 +1045,7 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
     {
       if (undoRecord != 0)
         _doc.EndUndoRecord(undoRecord);
+      _applyingAttributes = false;
     }
 
     if (changed)
