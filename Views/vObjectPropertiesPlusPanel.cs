@@ -80,6 +80,7 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
 
   private readonly RectangleSideHighlightConduit _rectangleSideHighlightConduit = new();
   private RectangleHighlightKind _rectangleHighlightKind = RectangleHighlightKind.None;
+  private readonly FocusHighlightConduit _focusHighlightConduit = new();
 
   private RhinoDoc? _doc;
   private readonly List<Guid> _selectedObjectIds = new();
@@ -329,6 +330,14 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
       _selectedObjectIds.Clear();
       foreach (var o in objectList)
         _selectedObjectIds.Add(o.Id);
+      _focusHighlightConduit.Clear();
+      _focusHighlightConduit.Enabled = false;
+    }
+    else
+    {
+      // Keep _allSelectedObjects intact; scope edits to focused object only.
+      _selectedObjectIds.Clear();
+      _selectedObjectIds.Add(_focusedObjectId);
     }
 
     _isUpdatingUi = true;
@@ -701,6 +710,12 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
       if (_focusedObjectId != Guid.Empty)
       {
         _focusedObjectId = Guid.Empty;
+        _selectedObjectIds.Clear();
+        foreach (var o in _allSelectedObjects)
+          _selectedObjectIds.Add(o.Id);
+        _focusHighlightConduit.Clear();
+        _focusHighlightConduit.Enabled = false;
+        _doc?.Views.Redraw();
         UpdateFromSelection(_doc, _allSelectedObjects);
       }
       return;
@@ -713,9 +728,13 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
     RhinoObject focused = _allSelectedObjects[objIdx];
     _focusedObjectId = focused.Id;
 
-    // Highlight only this object in the viewport.
-    foreach (var o in _allSelectedObjects)
-      o.Highlight(o.Id == focused.Id);
+    // Scope edits to focused object only.
+    _selectedObjectIds.Clear();
+    _selectedObjectIds.Add(focused.Id);
+
+    // Show orange highlight on focused object via conduit (selection unchanged).
+    _focusHighlightConduit.SetObject(focused);
+    _focusHighlightConduit.Enabled = true;
     _doc.Views.Redraw();
 
     // Refresh panel for just this one object.
@@ -845,6 +864,14 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
   {
     if (_doc == null)
       yield break;
+
+    if (_focusedObjectId != Guid.Empty)
+    {
+      var obj = _doc.Objects.FindId(_focusedObjectId);
+      if (obj != null)
+        yield return obj;
+      yield break;
+    }
 
     foreach (var id in _selectedObjectIds)
     {
@@ -2967,6 +2994,44 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
         g.DrawRectangle(Colors.Black, 0, 0, 17, 17);
       }
       return bitmap;
+    }
+  }
+
+  private sealed class FocusHighlightConduit : DisplayConduit
+  {
+    private RhinoObject? _obj;
+
+    public void SetObject(RhinoObject obj) => _obj = obj;
+    public void Clear() => _obj = null;
+
+    protected override void PostDrawObjects(DrawEventArgs e)
+    {
+      base.PostDrawObjects(e);
+      if (_obj?.Geometry == null)
+        return;
+
+      var color = System.Drawing.Color.FromArgb(255, 235, 130, 20);
+      switch (_obj.Geometry)
+      {
+        case Curve crv:
+          e.Display.DrawCurve(crv, color, 3);
+          break;
+        case Rhino.Geometry.Brep brep:
+          e.Display.DrawBrepWires(brep, color, 1);
+          break;
+        case Rhino.Geometry.Extrusion ext:
+          var extBrep = ext.ToBrep(true);
+          if (extBrep != null) e.Display.DrawBrepWires(extBrep, color, 1);
+          break;
+        case Rhino.Geometry.Mesh mesh:
+          e.Display.DrawMeshWires(mesh, color, 2);
+          break;
+        default:
+          var bb = _obj.Geometry.GetBoundingBox(false);
+          if (bb.IsValid)
+            e.Display.DrawBox(new Rhino.Geometry.Box(bb), color, 2);
+          break;
+      }
     }
   }
 
