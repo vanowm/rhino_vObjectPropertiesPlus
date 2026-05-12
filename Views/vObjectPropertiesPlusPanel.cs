@@ -338,6 +338,15 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
       // Keep _allSelectedObjects intact; scope edits to focused object only.
       _selectedObjectIds.Clear();
       _selectedObjectIds.Add(_focusedObjectId);
+      // Replace stale reference in _allSelectedObjects with the fresh one.
+      if (objectList.Count == 1)
+      {
+        int fi = _allSelectedObjects.FindIndex(o => o.Id == _focusedObjectId);
+        if (fi >= 0)
+          _allSelectedObjects[fi] = objectList[0];
+        // Keep conduit pointing at the fresh object so geometry/layer stays current.
+        _focusHighlightConduit.SetObject(objectList[0]);
+      }
     }
 
     _isUpdatingUi = true;
@@ -663,23 +672,84 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
     if (objects.Count == 1)
       return TypeName(objects[0]);
 
-    ObjectType firstType = objects[0].ObjectType;
-    bool allSameType = objects.All(o => o.ObjectType == firstType);
+    string firstName = TypeName(objects[0]);
+    bool allSameType = objects.All(o => TypeName(o) == firstName);
     if (allSameType)
-      return $"{objects.Count} {Pluralize(firstType.ToString().Replace("_", " ").ToLowerInvariant(), objects.Count)}";
+      return $"{objects.Count} {Pluralize(firstName, objects.Count)}";
 
     return "varies";
   }
 
   private static string TypeName(RhinoObject obj)
   {
-    string raw = obj.ObjectType.ToString().Replace("_", " ").ToLowerInvariant();
-    if (raw == "curve")
+    if (obj.ObjectType != ObjectType.Curve)
+      return obj.ObjectType.ToString().Replace("_", " ").ToLowerInvariant();
+
+    return obj.Geometry is Curve c ? CurveTypeName(c) : "curve";
+  }
+
+  private static string CurveTypeName(Curve c)
+  {
+    // Circle (check before arc — circles satisfy TryGetArc too).
+    if (c.TryGetCircle(out _))
+      return "circle";
+
+    // Arc.
+    if (c.TryGetArc(out _))
+      return "arc";
+
+    // Full ellipse.
+    if (c.IsClosed && c.TryGetEllipse(out _))
+      return "ellipse";
+
+    // Polyline / line / rectangle / square.
+    if (c.TryGetPolyline(out Polyline pl) && pl.IsValid)
     {
-      if (obj.Geometry is Curve c)
-        return c.IsClosed ? "closed curve" : "open curve";
+      if (pl.SegmentCount == 1)
+        return "line";
+
+      if (pl.IsClosed && pl.SegmentCount == 4 && IsPolylineRectangle(pl))
+        return IsPolylineSquare(pl) ? "square" : "rectangle";
+
+      return "polyline";
     }
-    return raw;
+
+    // LineCurve fallback.
+    if (c is LineCurve)
+      return "line";
+
+    return c.IsClosed ? "closed curve" : "curve";
+  }
+
+  private static bool IsPolylineRectangle(Polyline pl)
+  {
+    // pl is closed with 4 segments; check all interior angles are 90 degrees.
+    for (int i = 0; i < 4; i++)
+    {
+      Vector3d v1 = pl[(i + 1) % 4] - pl[i];
+      Vector3d v2 = pl[(i + 2) % 4] - pl[(i + 1) % 4];
+      double len1 = v1.Length;
+      double len2 = v2.Length;
+      if (len1 < RhinoMath.SqrtEpsilon || len2 < RhinoMath.SqrtEpsilon)
+        return false;
+      double cosAngle = (v1 * v2) / (len1 * len2);
+      if (Math.Abs(cosAngle) > 1e-6)
+        return false;
+    }
+    return true;
+  }
+
+  private static bool IsPolylineSquare(Polyline pl)
+  {
+    double l0 = pl[0].DistanceTo(pl[1]);
+    double l1 = pl[1].DistanceTo(pl[2]);
+    double l2 = pl[2].DistanceTo(pl[3]);
+    double l3 = pl[3].DistanceTo(pl[0]);
+    double avg = (l0 + l1 + l2 + l3) / 4.0;
+    if (avg < RhinoMath.SqrtEpsilon)
+      return false;
+    double tol = avg * 1e-6;
+    return Math.Abs(l0 - l1) < tol && Math.Abs(l1 - l2) < tol && Math.Abs(l2 - l3) < tol;
   }
 
   private static string Pluralize(string value, int count)
