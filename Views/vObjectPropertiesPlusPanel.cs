@@ -67,6 +67,8 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
   private readonly DropDown _infoPrecisionDrop;
   private readonly Label _radiusNameLabel;
   private readonly Label _diameterNameLabel;
+  private readonly Label _polygonSidesLabel;
+  private readonly NumericStepper _polygonSidesStepper;
   private readonly Dictionary<string, Image?> _uiIconCache = new(StringComparer.OrdinalIgnoreCase);
   private readonly Dictionary<Guid, bool> _layerExpandedState = new();
   private string _currentLayerFullPath = "-";
@@ -134,6 +136,8 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
 
     _radiusNameLabel = new Label { Text = "Radius", Width = LabelWidth };
     _diameterNameLabel = new Label { Text = "Diameter", Width = LabelWidth };
+    _polygonSidesLabel = new Label { Text = "Sides", Width = LabelWidth };
+    _polygonSidesStepper = NewNumericStepper(3, 360, 1, 0);
 
     SetUnitDropOptions(_curveMetricUnitDrop);
     SetUnitDropOptions(_radiusUnitDrop);
@@ -179,6 +183,7 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
     WireSubmitOnEnter(_curveMetricBox, ApplyEditedCurveMetric);
     WireSubmitOnEnter(_radiusBox, ApplyEditedRadius);
     WireSubmitOnEnter(_diameterBox, ApplyEditedDiameter);
+    _polygonSidesStepper.ValueChanged += (_, _) => { if (!_isUpdatingUi) ApplyPolygonSides(); };
 
     _layerDrop.SelectedIndexChanged += (_, _) => ApplyLayer();
     _displayColorDrop.SelectedIndexChanged += (_, _) => ApplyDisplayColorSource();
@@ -265,6 +270,7 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
         NewDynamicValueWithUnitDropRow(_curveMetricLabel, _curveMetricBox, _curveMetricUnitDrop),
         NewDynamicValueWithUnitDropRow(_radiusNameLabel, _radiusBox, _radiusUnitDrop),
         NewDynamicValueWithUnitDropRow(_diameterNameLabel, _diameterBox, _diameterUnitDrop),
+        NewDynamicValueRow(_polygonSidesLabel, _polygonSidesStepper),
         NewDynamicValueWithUnitDropRow(_totalLengthNameLabel, _totalLengthBox, _totalLengthUnitDrop),
       }
     };
@@ -442,6 +448,8 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
     int arcCount = 0;
     var ellipseAxes = new List<(double a, double b)>();
     int ellipseCount = 0;
+    var polygonInfoData = new List<(int sides, double circumRadius)>();
+    int polygonCount = 0;
     var rectangleSizes = new List<(double width, double height)>();
     double rectangleDistanceTolerance = Math.Max((doc?.ModelAbsoluteTolerance ?? RhinoMath.SqrtEpsilon) * 2.0, 1e-8);
     double rectangleAngleToleranceRadians = RhinoMath.ToRadians(2.0);
@@ -473,6 +481,13 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
 
       if (TryGetRectangleDimensions(curve, rectangleDistanceTolerance, rectangleAngleToleranceRadians, horizontalReference, out double rectWidth, out double rectHeight))
         rectangleSizes.Add((rectWidth, rectHeight));
+      else if (curve.TryGetPolyline(out Polyline polyPl) && polyPl.IsValid
+        && TryGetRegularPolygon(polyPl, rectangleDistanceTolerance,
+          out int polySides, out _, out _, out _, out double polyCircumR, out _))
+      {
+        polygonInfoData.Add((polySides, polyCircumR));
+        polygonCount++;
+      }
     }
 
     UnitSystem modelUnits = doc?.ModelUnitSystem ?? UnitSystem.None;
@@ -497,7 +512,15 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
       && rectangleSizes.Count == curveCount
       && objectList.All(o => o.Geometry is Curve);
 
-    _totalLengthNameLabel.Text = hasRectangleOnly ? "Perimeter" : "Total length";
+    bool hasPolygonOnly = !hasSegmentSelection
+      && !hasCircular
+      && !hasEllipse
+      && !hasRectangleOnly
+      && polygonCount > 0
+      && polygonCount == curveCount
+      && objectList.All(o => o.Geometry is Curve);
+
+    _totalLengthNameLabel.Text = (hasRectangleOnly || hasPolygonOnly) ? "Perimeter" : "Total length";
 
     if (hasRectangleOnly)
     {
@@ -509,21 +532,28 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
       _radiusNameLabel.Text = "A";
       _diameterNameLabel.Text = "B";
     }
+    else if (hasPolygonOnly)
+    {
+      _radiusNameLabel.Text = "Outer R";
+      _diameterNameLabel.Text = "Inner R";
+    }
     else
     {
       _radiusNameLabel.Text = "Radius";
       _diameterNameLabel.Text = "Diameter";
     }
 
-    bool showSecondaryMetrics = hasCircular || hasRectangleOnly || hasEllipse;
+    bool showSecondaryMetrics = hasCircular || hasRectangleOnly || hasEllipse || hasPolygonOnly;
     _radiusNameLabel.Visible = showSecondaryMetrics;
     _radiusBox.Visible = showSecondaryMetrics;
     _radiusUnitDrop.Visible = showSecondaryMetrics;
     _diameterNameLabel.Visible = showSecondaryMetrics;
     _diameterBox.Visible = showSecondaryMetrics;
     _diameterUnitDrop.Visible = showSecondaryMetrics;
+    _polygonSidesLabel.Visible = hasPolygonOnly;
+    _polygonSidesStepper.Visible = hasPolygonOnly;
 
-    bool showCurveMetric = !hasRectangleOnly;
+    bool showCurveMetric = !hasRectangleOnly && !hasPolygonOnly;
     _curveMetricLabel.Visible = showCurveMetric;
     _curveMetricBox.Visible = showCurveMetric;
     _curveMetricUnitDrop.Visible = showCurveMetric;
@@ -598,6 +628,30 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
 
       SetEditableTextValue(_radiusBox, aSame ? FormatInfoNumber(displayA[0], _radiusUnitDrop) : VariesText);
       SetEditableTextValue(_diameterBox, bSame ? FormatInfoNumber(displayB[0], _diameterUnitDrop) : VariesText);
+      EnsureSegmentReadOnlyInfoBoxesAreSelectable(hasSegmentSelection);
+      RefreshRectangleSideHighlight();
+      return;
+    }
+
+    if (hasPolygonOnly)
+    {
+      _polygonSidesStepper.Value = polygonInfoData[0].sides;
+      _polygonSidesStepper.Enabled = true;
+      _radiusBox.Enabled = true;
+      _diameterBox.Enabled = true;
+
+      var displayOuterR = polygonInfoData
+        .Select(p => ConvertLength(p.circumRadius, modelUnits, radiusUnits))
+        .ToList();
+      var displayInnerR = polygonInfoData
+        .Select(p => ConvertLength(p.circumRadius * Math.Cos(Math.PI / p.sides), modelUnits, diameterUnits))
+        .ToList();
+
+      bool outerSame = displayOuterR.All(r => RhinoMath.EpsilonEquals(r, displayOuterR[0], RhinoMath.SqrtEpsilon));
+      bool innerSame = displayInnerR.All(r => RhinoMath.EpsilonEquals(r, displayInnerR[0], RhinoMath.SqrtEpsilon));
+
+      SetEditableTextValue(_radiusBox, outerSame ? FormatInfoNumber(displayOuterR[0], _radiusUnitDrop) : VariesText);
+      SetEditableTextValue(_diameterBox, innerSame ? FormatInfoNumber(displayInnerR[0], _diameterUnitDrop) : VariesText);
       EnsureSegmentReadOnlyInfoBoxesAreSelectable(hasSegmentSelection);
       RefreshRectangleSideHighlight();
       return;
@@ -693,6 +747,8 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
     _diameterBox.Visible = false;
     _diameterBox.ReadOnly = false;
     _diameterUnitDrop.Visible = false;
+    _polygonSidesLabel.Visible = false;
+    _polygonSidesStepper.Visible = false;
     DisableRectangleSideHighlight();
   }
 
@@ -757,6 +813,11 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
 
       if (pl.IsClosed && pl.SegmentCount == 4 && IsPolylineRectangle(pl))
         return IsPolylineSquare(pl) ? "square" : "rectangle";
+
+      if (pl.IsClosed && pl.SegmentCount >= 3
+        && TryGetRegularPolygon(pl, RhinoMath.SqrtEpsilon * 100,
+          out _, out _, out _, out _, out _, out _))
+        return "polygon";
 
       return "polyline";
     }
@@ -2011,6 +2072,198 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
     }
   }
 
+  private List<(Guid id, int sides, Point3d center, Vector3d firstVertexDir, Vector3d normal, double circumRadius)> SelectedPolygons()
+  {
+    var list = new List<(Guid, int, Point3d, Vector3d, Vector3d, double)>();
+    double distTol = Math.Max((_doc?.ModelAbsoluteTolerance ?? RhinoMath.SqrtEpsilon) * 2.0, 1e-8);
+    foreach (var obj in SelectedRhinoObjects())
+    {
+      if (obj.Geometry is not Curve c)
+        continue;
+      if (!c.TryGetPolyline(out Polyline pl) || !pl.IsValid)
+        continue;
+      if (!TryGetRegularPolygon(pl, distTol, out int sides, out Point3d center,
+            out Vector3d firstVertexDir, out Vector3d polyNormal, out double circumR, out _))
+        continue;
+      list.Add((obj.Id, sides, center, firstVertexDir, polyNormal, circumR));
+    }
+    return list;
+  }
+
+  private bool IsPolygonOnlySelection(out List<(Guid id, int sides, Point3d center, Vector3d firstVertexDir, Vector3d normal, double circumRadius)> polygons)
+  {
+    polygons = SelectedPolygons();
+    var selected = SelectedRhinoObjects().ToList();
+    if (selected.Count == 0)
+      return false;
+    if (!selected.All(o => o.Geometry is Curve))
+      return false;
+    return polygons.Count == selected.Count;
+  }
+
+  private void ApplyPolygonSides()
+  {
+    if (_isUpdatingUi || _doc == null)
+      return;
+    int newSides = (int)Math.Round(_polygonSidesStepper.Value);
+    if (newSides < 3)
+      return;
+    if (!IsPolygonOnlySelection(out var polygons))
+      return;
+
+    uint undoRecord = _doc.BeginUndoRecord("Object+ Polygon Sides");
+    bool changed = false;
+    try
+    {
+      foreach (var p in polygons)
+      {
+        var curve = BuildRegularPolygonCurve(p.center, p.firstVertexDir, p.normal, p.circumRadius, newSides);
+        changed |= _doc.Objects.Replace(p.id, curve);
+      }
+    }
+    finally
+    {
+      if (undoRecord != 0)
+        _doc.EndUndoRecord(undoRecord);
+    }
+
+    if (changed)
+    {
+      _doc.Views.Redraw();
+      RefreshFromCurrentSelection();
+    }
+  }
+
+  private void ApplyPolygonCircumRadiusToSelection(double newCircumR)
+  {
+    if (_isUpdatingUi || _doc == null)
+      return;
+    if (newCircumR <= RhinoMath.ZeroTolerance)
+      return;
+    if (!IsPolygonOnlySelection(out var polygons))
+      return;
+
+    uint undoRecord = _doc.BeginUndoRecord("Object+ Polygon Radius");
+    bool changed = false;
+    try
+    {
+      foreach (var p in polygons)
+      {
+        var curve = BuildRegularPolygonCurve(p.center, p.firstVertexDir, p.normal, newCircumR, p.sides);
+        changed |= _doc.Objects.Replace(p.id, curve);
+      }
+    }
+    finally
+    {
+      if (undoRecord != 0)
+        _doc.EndUndoRecord(undoRecord);
+    }
+
+    if (changed)
+    {
+      _doc.Views.Redraw();
+      RefreshFromCurrentSelection();
+    }
+  }
+
+  private static Curve BuildRegularPolygonCurve(Point3d center, Vector3d firstVertexDir, Vector3d normal, double circumRadius, int sides)
+  {
+    var pts = new Point3d[sides + 1];
+    double angleStep = 2.0 * Math.PI / sides;
+    for (int i = 0; i < sides; i++)
+    {
+      var v = new Vector3d(firstVertexDir);
+      v.Rotate(i * angleStep, normal);
+      pts[i] = center + v * circumRadius;
+    }
+    pts[sides] = pts[0];
+    return new PolylineCurve(pts);
+  }
+
+  private static bool TryGetRegularPolygon(
+    Polyline pl,
+    double distTol,
+    out int sides,
+    out Point3d center,
+    out Vector3d firstVertexDir,
+    out Vector3d normal,
+    out double circumRadius,
+    out double apothem)
+  {
+    sides = 0;
+    center = Point3d.Unset;
+    firstVertexDir = Vector3d.Zero;
+    normal = Vector3d.Zero;
+    circumRadius = 0;
+    apothem = 0;
+
+    if (!pl.IsValid || !pl.IsClosed)
+      return false;
+
+    int n = pl.SegmentCount;
+    if (n < 3)
+      return false;
+
+    // All segments must have equal length.
+    double len0 = pl[0].DistanceTo(pl[1]);
+    if (len0 < distTol)
+      return false;
+    double lenTol = Math.Max(distTol, len0 * 1e-4);
+    for (int i = 1; i < n; i++)
+    {
+      double li = pl[i].DistanceTo(pl[(i + 1) % n]);
+      if (Math.Abs(li - len0) > lenTol)
+        return false;
+    }
+
+    // All interior angles must equal (n-2)*180/n degrees.
+    double expectedInteriorDeg = (n - 2) * 180.0 / n;
+    double angTolDeg = 1.5;
+    for (int i = 0; i < n; i++)
+    {
+      var incoming = pl[(i + 1) % n] - pl[i];
+      var outgoing = pl[(i + 2) % n] - pl[(i + 1) % n];
+      if (!incoming.Unitize() || !outgoing.Unitize())
+        return false;
+      double cosInterior = (-incoming) * outgoing;
+      double interiorDeg = RhinoMath.ToDegrees(Math.Acos(Math.Clamp(cosInterior, -1.0, 1.0)));
+      if (Math.Abs(interiorDeg - expectedInteriorDeg) > angTolDeg)
+        return false;
+    }
+
+    // Center = mean of vertices (excluding duplicate closing vertex).
+    double cx = 0, cy = 0, cz = 0;
+    for (int i = 0; i < n; i++) { cx += pl[i].X; cy += pl[i].Y; cz += pl[i].Z; }
+    center = new Point3d(cx / n, cy / n, cz / n);
+
+    // All vertices must be equidistant from center.
+    circumRadius = center.DistanceTo(pl[0]);
+    if (circumRadius < distTol)
+      return false;
+    double radTol = Math.Max(distTol, circumRadius * 1e-4);
+    for (int i = 1; i < n; i++)
+    {
+      if (Math.Abs(center.DistanceTo(pl[i]) - circumRadius) > radTol)
+        return false;
+    }
+
+    // Normal from first two edge vectors.
+    var edge0 = pl[1] - pl[0];
+    var edge1 = pl[2] - pl[1];
+    normal = Vector3d.CrossProduct(edge0, edge1);
+    if (!normal.Unitize())
+      return false;
+
+    firstVertexDir = pl[0] - center;
+    if (!firstVertexDir.Unitize())
+      return false;
+
+    Point3d midEdge = pl[0] + (pl[1] - pl[0]) * 0.5;
+    apothem = center.DistanceTo(midEdge);
+    sides = n;
+    return true;
+  }
+
   private void ApplyEditedRadius()
   {
     if (_radiusBox.ReadOnly)
@@ -2024,6 +2277,12 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
 
     if (ApplyRectangleDimensionsToSelection(radius, null))
       return;
+
+    if (IsPolygonOnlySelection(out _))
+    {
+      ApplyPolygonCircumRadiusToSelection(radius);
+      return;
+    }
 
     ApplyCircularRadiusToSelection(radius);
   }
@@ -2041,6 +2300,15 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
 
     if (ApplyRectangleDimensionsToSelection(null, diameter))
       return;
+
+    if (IsPolygonOnlySelection(out var polygons) && polygons.Count > 0)
+    {
+      // Inner R (apothem) → circumradius: outerR = innerR / cos(π/N)
+      double apothem = diameter;
+      double circumR = apothem / Math.Cos(Math.PI / polygons[0].sides);
+      ApplyPolygonCircumRadiusToSelection(circumR);
+      return;
+    }
 
     ApplyCircularRadiusToSelection(diameter * 0.5);
   }
@@ -3379,6 +3647,14 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
     };
 
     return NewBorderedRow(new Label { Text = name, Width = LabelWidth }, right);
+  }
+
+  private static TableRow NewDynamicValueRow(Label label, Control value)
+  {
+    value.Height = RowHeight;
+    if (value.Width <= 0)
+      value.Width = ValueWidth;
+    return NewBorderedRow(label, value);
   }
 
   private static TableRow NewDynamicValueWithUnitDropRow(Label label, Control value, DropDown unitDrop)

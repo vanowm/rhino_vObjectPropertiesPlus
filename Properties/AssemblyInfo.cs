@@ -9,9 +9,9 @@ using Rhino.PlugIns;
 [assembly: AssemblyProduct("vObjectProperties+")]
 [assembly: AssemblyCopyright("")]
 [assembly: AssemblyTrademark("")]
-[assembly: AssemblyVersion("26.5.12.1058")]
-[assembly: AssemblyFileVersion("26.5.12.1058")]
-[assembly: AssemblyInformationalVersion("26.5.12.1058")]
+[assembly: AssemblyVersion("26.5.7.1029")]
+[assembly: AssemblyFileVersion("26.5.7.1029")]
+[assembly: AssemblyInformationalVersion("26.5.7.1029")]
 [assembly: ComVisible(false)]
 
 [assembly: Guid("2E0E8488-399B-4D87-B845-8A486911F808")]
