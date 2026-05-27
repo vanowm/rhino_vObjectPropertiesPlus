@@ -2016,17 +2016,9 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
     if (!arc.IsValid || radius <= RhinoMath.ZeroTolerance)
       return false;
 
-    Point3d center = arc.Center;
-    Vector3d startDir = arc.StartPoint - center;
-    Vector3d midDir = arc.MidPoint - center;
-    Vector3d endDir = arc.EndPoint - center;
-    if (!startDir.Unitize() || !midDir.Unitize() || !endDir.Unitize())
-      return false;
-
-    Point3d start = center + (startDir * radius);
-    Point3d mid = center + (midDir * radius);
-    Point3d end = center + (endDir * radius);
-    var candidate = new Arc(start, mid, end);
+    // arc.Plane.XAxis points to the arc start; arc.Angle is the angular extent (radians).
+    // Construct a new arc in the same plane with the same start direction and sweep angle.
+    var candidate = new Arc(arc.Plane, radius, arc.Angle);
     if (!candidate.IsValid)
       return false;
 
