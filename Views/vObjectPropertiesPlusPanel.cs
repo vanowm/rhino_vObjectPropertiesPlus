@@ -2016,9 +2016,10 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
     if (!arc.IsValid || radius <= RhinoMath.ZeroTolerance)
       return false;
 
-    // arc.Plane.XAxis points to the arc start; arc.Angle is the angular extent (radians).
-    // Construct a new arc in the same plane with the same start direction and sweep angle.
-    var candidate = new Arc(arc.Plane, radius, arc.Angle);
+    // Arc is a value type — copy it and update only the radius.
+    // This preserves the plane (and its start-angle offset), angle domain, and sweep direction.
+    var candidate = arc;
+    candidate.Radius = radius;
     if (!candidate.IsValid)
       return false;
 
