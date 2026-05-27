@@ -2098,8 +2098,10 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
     {
       if (obj.Geometry is not Curve curve)
         return false;
-      // Circles satisfy TryGetEllipse too; exclude them.
+      // Full circles and circular arcs satisfy TryGetEllipse too; exclude both.
       if (curve.TryGetCircle(out _))
+        return false;
+      if (curve.TryGetArc(out _))
         return false;
       if (!curve.TryGetEllipse(out Ellipse e))
         return false;
