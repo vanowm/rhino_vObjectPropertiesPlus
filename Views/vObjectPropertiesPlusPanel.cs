@@ -2050,19 +2050,22 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
         if (obj.Geometry is not Curve curve)
           continue;
 
-        if (curve.TryGetCircle(out Circle circle))
-        {
-          var c = new Circle(circle.Plane, circle.Center, radius);
-          changed |= _doc.Objects.Replace(obj.Id, new ArcCurve(c));
-          continue;
-        }
-
         if (!curve.TryGetArc(out Arc arc))
           continue;
-        if (!TryCreateArcWithRadius(arc, radius, out Arc resizedArc))
-          continue;
 
-        changed |= _doc.Objects.Replace(obj.Id, new ArcCurve(resizedArc));
+        if (arc.IsCircle)
+        {
+          // Full circle — keep it a circle at the new radius.
+          var c = new Circle(arc.Plane, radius);
+          changed |= _doc.Objects.Replace(obj.Id, new ArcCurve(c));
+        }
+        else
+        {
+          // Partial arc — scale around center, preserve start/end angles.
+          if (!TryCreateArcWithRadius(arc, radius, out Arc resizedArc))
+            continue;
+          changed |= _doc.Objects.Replace(obj.Id, new ArcCurve(resizedArc));
+        }
       }
     }
     finally
