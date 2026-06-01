@@ -391,7 +391,7 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
       if (_allSelectedObjects.Count > 1)
       {
         foreach (var o in _allSelectedObjects)
-          typeItems.Add(BuildObjectDropLabel(o));
+          typeItems.Add(BuildObjectDropLabel(o, doc));
       }
       _typeDrop.DataStore = typeItems;
       _typeDrop.SelectedIndex = isFocusDrillDown
@@ -793,10 +793,20 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
 
   private static string TypeName(RhinoObject obj)
   {
-    if (obj.ObjectType != ObjectType.Curve)
-      return obj.ObjectType.ToString().Replace("_", " ").ToLowerInvariant();
+    if (obj.ObjectType == ObjectType.Curve)
+      return obj.Geometry is Curve c ? CurveTypeName(c) : "curve";
 
-    return obj.Geometry is Curve c ? CurveTypeName(c) : "curve";
+    return obj.Geometry switch
+    {
+      TextEntity    => "text",
+      TextDot       => "text dot",
+      AngularDimension => "angle dim",
+      RadialDimension  => "radial dim",
+      Centermark    => "centermark",
+      Dimension     => "dimension",
+      Leader        => "leader",
+      _             => obj.ObjectType.ToString().Replace("_", " ").ToLowerInvariant()
+    };
   }
 
   private static string CurveTypeName(Curve c)
@@ -877,12 +887,93 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
     return value + "s";
   }
 
-  private static string BuildObjectDropLabel(RhinoObject obj)
+  private static string BuildObjectDropLabel(RhinoObject obj, RhinoDoc? doc)
   {
     string type = TypeName(obj);
     string name = obj.Attributes.Name;
-    return string.IsNullOrWhiteSpace(name) ? type : $"{type} \"{name}\"";
+    string info = ObjectExtraInfo(obj, doc);
+    string label = string.IsNullOrWhiteSpace(name) ? type : $"{type} \"{name}\"";
+    if (info.Length > 0)
+      label += $" ({info})";
+    return label;
   }
+
+  private static string ObjectExtraInfo(RhinoObject obj, RhinoDoc? doc)
+  {
+    UnitSystem units = doc?.ModelUnitSystem ?? UnitSystem.None;
+    string ua = ModelUnitAbbrev(units);
+
+    // Text annotations: show text content.
+    if (obj.Geometry is AnnotationBase ann)
+    {
+      if (ann is TextEntity || ann is Leader)
+      {
+        string plain = ann.PlainText?.Trim() ?? "";
+        if (plain.Length > 0) return TruncateDropLabel(plain, 30);
+      }
+      return "";
+    }
+    if (obj.Geometry is TextDot dot)
+      return TruncateDropLabel(dot.Text?.Trim() ?? "", 30);
+
+    // Curves: show geometry metrics.
+    if (obj.Geometry is Curve crv)
+    {
+      // Circle / Arc → diameter.
+      if (crv.TryGetCircle(out Circle circle))
+        return FormatDiamDropLabel(circle.Radius * 2, ua);
+      if (crv.TryGetArc(out Arc arc))
+        return FormatDiamDropLabel(arc.Radius * 2, ua);
+
+      // Rectangle / Square → W × H.
+      if (crv.TryGetPolyline(out Polyline pl) && pl.IsValid && pl.IsClosed
+          && pl.SegmentCount == 4 && IsPolylineRectangle(pl))
+      {
+        double w = pl[0].DistanceTo(pl[1]);
+        double h = pl[1].DistanceTo(pl[2]);
+        if (h > w) { var tmp = w; w = h; h = tmp; }
+        string suffix = ua.Length > 0 ? " " + ua : "";
+        return $"{FormatNumber(w)} × {FormatNumber(h)}{suffix}";
+      }
+
+      // Length for everything else (line, polyline, ellipse, generic curve).
+      double len = crv.GetLength();
+      if (len > 0 && !double.IsNaN(len))
+      {
+        string suffix = ua.Length > 0 ? " " + ua : "";
+        return $"{FormatNumber(len)}{suffix}";
+      }
+    }
+
+    return "";
+  }
+
+  private static string FormatDiamDropLabel(double diameter, string unitAbbr)
+  {
+    string num = FormatNumber(diameter);
+    return unitAbbr.Length > 0 ? $"⌀{num} {unitAbbr}" : $"⌀{num}";
+  }
+
+  private static string TruncateDropLabel(string s, int maxLen)
+  {
+    if (string.IsNullOrEmpty(s)) return "";
+    return s.Length <= maxLen ? s : s.Substring(0, maxLen - 1) + "\u2026";
+  }
+
+  private static string ModelUnitAbbrev(UnitSystem us) => us switch
+  {
+    UnitSystem.Millimeters => "mm",
+    UnitSystem.Centimeters => "cm",
+    UnitSystem.Meters      => "m",
+    UnitSystem.Kilometers  => "km",
+    UnitSystem.Inches      => "in",
+    UnitSystem.Feet        => "ft",
+    UnitSystem.Miles       => "mi",
+    UnitSystem.Yards       => "yd",
+    UnitSystem.Microns     => "\u00b5m",
+    UnitSystem.Nanometers  => "nm",
+    _                      => ""
+  };
 
   private void OnTypeDropSelectedIndexChanged(object? sender, EventArgs e)
   {
