@@ -350,7 +350,7 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
     if (!isFocusDrillDown)
     {
       bool wasHighlighting = _focusHighlightConduit.Enabled;
-      _allSelectedObjects = objectList;
+      _allSelectedObjects = SortObjectsForDropdown(objectList);
       _focusedObjectId = Guid.Empty;
       _selectedObjectIds.Clear();
       foreach (var o in objectList)
@@ -885,6 +885,47 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
     if (value.EndsWith("s", StringComparison.OrdinalIgnoreCase))
       return value;
     return value + "s";
+  }
+
+  // Sort objects for the type dropdown: alphabetically by type name, but keeping
+  // Rhino-group members adjacent (each group is sorted as a unit by its first type).
+  private static List<RhinoObject> SortObjectsForDropdown(List<RhinoObject> objects)
+  {
+    if (objects.Count <= 1) return objects;
+
+    // Build clusters: objects sharing a Rhino group index stay in the same cluster.
+    // Ungrouped objects each become a singleton cluster.
+    var clusters = new List<List<RhinoObject>>();
+    var groupMap  = new Dictionary<int, List<RhinoObject>>();
+
+    foreach (var obj in objects)
+    {
+      int[]? groups = obj.Attributes.GetGroupList();
+      if (groups != null && groups.Length > 0)
+      {
+        int gIdx = groups[0];
+        if (!groupMap.TryGetValue(gIdx, out var cluster))
+        {
+          cluster = new List<RhinoObject>();
+          groupMap[gIdx] = cluster;
+          clusters.Add(cluster);
+        }
+        cluster.Add(obj);
+      }
+      else
+      {
+        clusters.Add(new List<RhinoObject> { obj });
+      }
+    }
+
+    // Sort each cluster internally by type name.
+    foreach (var cluster in clusters)
+      cluster.Sort((a, b) => string.Compare(TypeName(a), TypeName(b), StringComparison.Ordinal));
+
+    // Sort the cluster list by the first member's type name.
+    clusters.Sort((a, b) => string.Compare(TypeName(a[0]), TypeName(b[0]), StringComparison.Ordinal));
+
+    return clusters.SelectMany(c => c).ToList();
   }
 
   private static string BuildObjectDropLabel(RhinoObject obj, RhinoDoc? doc)
