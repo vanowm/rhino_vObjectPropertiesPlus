@@ -87,6 +87,7 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
   private RhinoDoc? _doc;
   private readonly List<Guid> _selectedObjectIds = new();
   private List<RhinoObject> _allSelectedObjects = new();
+  private List<RhinoObject?> _typeDropMap = new();
   private Guid _focusedObjectId = Guid.Empty;
   private bool _isUpdatingUi;
   private long _lastUserEditMs;
@@ -350,7 +351,7 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
     if (!isFocusDrillDown)
     {
       bool wasHighlighting = _focusHighlightConduit.Enabled;
-      _allSelectedObjects = SortObjectsForDropdown(objectList);
+      _allSelectedObjects = BuildDropdownClusters(objectList).SelectMany(c => c).ToList();
       _focusedObjectId = Guid.Empty;
       _selectedObjectIds.Clear();
       foreach (var o in objectList)
@@ -385,18 +386,35 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
         return;
       }
 
-      // Populate type dropdown: item 0 = summary, then one item per object.
+      // Populate type dropdown: item 0 = summary, then per-object items with separators between groups.
       var typeItems = new List<string>();
+      _typeDropMap = new List<RhinoObject?>();
       typeItems.Add(BuildTypeText(_allSelectedObjects));
+      _typeDropMap.Add(null); // index 0 = summary
       if (_allSelectedObjects.Count > 1)
       {
-        foreach (var o in _allSelectedObjects)
-          typeItems.Add(BuildObjectDropLabel(o, doc));
+        var dropClusters = BuildDropdownClusters(_allSelectedObjects);
+        bool firstCluster = true;
+        foreach (var cluster in dropClusters)
+        {
+          if (!firstCluster)
+          {
+            typeItems.Add("─────────────");
+            _typeDropMap.Add(null);
+          }
+          firstCluster = false;
+          foreach (var o in cluster)
+          {
+            typeItems.Add(BuildObjectDropLabel(o, doc));
+            _typeDropMap.Add(o);
+          }
+        }
       }
       _typeDrop.DataStore = typeItems;
-      _typeDrop.SelectedIndex = isFocusDrillDown
-        ? Math.Max(0, _allSelectedObjects.FindIndex(o => o.Id == _focusedObjectId) + 1)
-        : 0;
+      int focusedMapIdx = isFocusDrillDown
+        ? _typeDropMap.FindIndex(o => o?.Id == _focusedObjectId)
+        : -1;
+      _typeDrop.SelectedIndex = focusedMapIdx > 0 ? focusedMapIdx : 0;
 
     _nameBox.Text = CommonOrVaries(objectList, o => SafeString(o.Attributes.Name));
     string layerText = CommonOrVaries(objectList, o => LayerName(doc, o.Attributes.LayerIndex));
@@ -889,12 +907,15 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
 
   // Sort objects for the type dropdown: alphabetically by type name, but keeping
   // Rhino-group members adjacent (each group is sorted as a unit by its first type).
-  private static List<RhinoObject> SortObjectsForDropdown(List<RhinoObject> objects)
+  // Build clusters of objects for the type dropdown.
+  // Objects sharing a Rhino group index are kept together; cluster order follows
+  // the original selection order (first occurrence of each group).
+  // Within each cluster, objects are sorted alphabetically by type name.
+  private static List<List<RhinoObject>> BuildDropdownClusters(List<RhinoObject> objects)
   {
-    if (objects.Count <= 1) return objects;
+    if (objects.Count <= 1)
+      return objects.Count == 0 ? new() : new() { new List<RhinoObject>(objects) };
 
-    // Build clusters: objects sharing a Rhino group index stay in the same cluster.
-    // Ungrouped objects each become a singleton cluster.
     var clusters = new List<List<RhinoObject>>();
     var groupMap  = new Dictionary<int, List<RhinoObject>>();
 
@@ -918,14 +939,11 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
       }
     }
 
-    // Sort each cluster internally by type name.
+    // Sort each cluster internally by type name; cluster list order is preserved (selection order).
     foreach (var cluster in clusters)
       cluster.Sort((a, b) => string.Compare(TypeName(a), TypeName(b), StringComparison.Ordinal));
 
-    // Sort the cluster list by the first member's type name.
-    clusters.Sort((a, b) => string.Compare(TypeName(a[0]), TypeName(b[0]), StringComparison.Ordinal));
-
-    return clusters.SelectMany(c => c).ToList();
+    return clusters;
   }
 
   private static string BuildObjectDropLabel(RhinoObject obj, RhinoDoc? doc)
@@ -1039,11 +1057,14 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
       return;
     }
 
-    int objIdx = idx - 1;
-    if (objIdx >= _allSelectedObjects.Count)
+    // Separator or out-of-range: snap back to summary, which triggers the restore path.
+    if (idx >= _typeDropMap.Count || _typeDropMap[idx] == null)
+    {
+      _typeDrop.SelectedIndex = 0;
       return;
+    }
 
-    RhinoObject focused = _allSelectedObjects[objIdx];
+    RhinoObject focused = _typeDropMap[idx]!;
     _focusedObjectId = focused.Id;
 
     // Scope edits to focused object only.
