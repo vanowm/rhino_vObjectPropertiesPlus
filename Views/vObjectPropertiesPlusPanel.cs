@@ -88,6 +88,8 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
   private readonly List<Guid> _selectedObjectIds = new();
   private List<RhinoObject> _allSelectedObjects = new();
   private List<RhinoObject?> _typeDropMap = new();
+  private List<List<RhinoObject>> _dropdownClusters = new();
+  private readonly List<string> _clusterKeyOrder = new();
   private Guid _focusedObjectId = Guid.Empty;
   private bool _isUpdatingUi;
   private long _lastUserEditMs;
@@ -351,7 +353,8 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
     if (!isFocusDrillDown)
     {
       bool wasHighlighting = _focusHighlightConduit.Enabled;
-      _allSelectedObjects = BuildDropdownClusters(objectList).SelectMany(c => c).ToList();
+      _dropdownClusters = BuildDropdownClusters(objectList);
+      _allSelectedObjects = _dropdownClusters.SelectMany(c => c).ToList();
       _focusedObjectId = Guid.Empty;
       _selectedObjectIds.Clear();
       foreach (var o in objectList)
@@ -372,6 +375,12 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
         int fi = _allSelectedObjects.FindIndex(o => o.Id == _focusedObjectId);
         if (fi >= 0)
           _allSelectedObjects[fi] = objectList[0];
+        // Also refresh stale reference in _dropdownClusters.
+        foreach (var cluster in _dropdownClusters)
+        {
+          int ci = cluster.FindIndex(o => o.Id == _focusedObjectId);
+          if (ci >= 0) { cluster[ci] = objectList[0]; break; }
+        }
         // Keep conduit pointing at the fresh object so geometry/layer stays current.
         _focusHighlightConduit.SetObject(objectList[0]);
       }
@@ -393,7 +402,7 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
       _typeDropMap.Add(null); // index 0 = summary
       if (_allSelectedObjects.Count > 1)
       {
-        var dropClusters = BuildDropdownClusters(_allSelectedObjects);
+        var dropClusters = _dropdownClusters;
         bool firstCluster = true;
         foreach (var cluster in dropClusters)
         {
@@ -905,19 +914,17 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
     return value + "s";
   }
 
-  // Sort objects for the type dropdown: alphabetically by type name, but keeping
-  // Rhino-group members adjacent (each group is sorted as a unit by its first type).
   // Build clusters of objects for the type dropdown.
-  // Objects sharing a Rhino group index are kept together; cluster order follows
-  // the original selection order (first occurrence of each group).
+  // Objects sharing a Rhino group index are kept together; cluster order is maintained
+  // across selection changes: known clusters keep their previous relative order,
+  // newly-seen clusters are appended at the end in document order.
   // Within each cluster, objects are sorted alphabetically by type name.
-  private static List<List<RhinoObject>> BuildDropdownClusters(List<RhinoObject> objects)
+  private List<List<RhinoObject>> BuildDropdownClusters(List<RhinoObject> objects)
   {
-    if (objects.Count <= 1)
-      return objects.Count == 0 ? new() : new() { new List<RhinoObject>(objects) };
+    if (objects.Count == 0) return new();
 
     var clusters = new List<List<RhinoObject>>();
-    var groupMap  = new Dictionary<int, List<RhinoObject>>();
+    var groupMap = new Dictionary<int, List<RhinoObject>>();
 
     foreach (var obj in objects)
     {
@@ -939,11 +946,30 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
       }
     }
 
-    // Sort each cluster internally by type name; cluster list order is preserved (selection order).
+    // Sort each cluster internally by type name.
     foreach (var cluster in clusters)
       cluster.Sort((a, b) => string.Compare(TypeName(a), TypeName(b), StringComparison.Ordinal));
 
-    return clusters;
+    // Order clusters: known clusters (seen in a previous selection) keep their
+    // previous relative order; new clusters are appended at the end in document order.
+    var ordered = clusters
+      .Select((c, docIdx) => (cluster: c, docIdx, keyIdx: _clusterKeyOrder.IndexOf(ClusterKey(c))))
+      .OrderBy(t => t.keyIdx >= 0 ? t.keyIdx : int.MaxValue)
+      .ThenBy(t => t.docIdx)
+      .Select(t => t.cluster)
+      .ToList();
+
+    // Persist order for the next call.
+    _clusterKeyOrder.Clear();
+    _clusterKeyOrder.AddRange(ordered.Select(ClusterKey));
+
+    return ordered;
+  }
+
+  private static string ClusterKey(List<RhinoObject> cluster)
+  {
+    int[]? groups = cluster[0].Attributes.GetGroupList();
+    return groups != null && groups.Length > 0 ? $"g:{groups[0]}" : $"o:{cluster[0].Id}";
   }
 
   private static string BuildObjectDropLabel(RhinoObject obj, RhinoDoc? doc)
