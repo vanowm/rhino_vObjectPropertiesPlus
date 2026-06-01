@@ -3470,9 +3470,9 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
     public void SetObject(RhinoObject obj) => _obj = obj;
     public void Clear() => _obj = null;
 
-    protected override void PostDrawObjects(DrawEventArgs e)
+    protected override void DrawOverlay(DrawEventArgs e)
     {
-      base.PostDrawObjects(e);
+      base.DrawOverlay(e);
       if (_obj?.Geometry == null)
         return;
 
@@ -3512,9 +3512,9 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
         _segments.AddRange(segments);
     }
 
-    protected override void PostDrawObjects(DrawEventArgs e)
+    protected override void DrawOverlay(DrawEventArgs e)
     {
-      base.PostDrawObjects(e);
+      base.DrawOverlay(e);
 
       if (_segments.Count == 0)
         return;
