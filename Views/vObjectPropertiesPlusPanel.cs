@@ -4322,23 +4322,32 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private void ApplyToTextObjects(Action<TextEntity> apply)
   {
     if (_doc == null) return;
+    vObjectPropertiesPlusPlugIn.DebugLog("ApplyToTextObjects: start");
     uint undoRecord = _doc.BeginUndoRecord("Object+ Text");
     bool changed = false;
     try
     {
+      int i = 0;
       foreach (var obj in SelectedRhinoObjects())
       {
-        if (obj.Geometry is not TextEntity te) continue;
+        vObjectPropertiesPlusPlugIn.DebugLog($"ApplyToTextObjects: obj[{i}] id={obj.Id}");
+        if (obj.Geometry is not TextEntity te) { vObjectPropertiesPlusPlugIn.DebugLog($"ApplyToTextObjects: obj[{i}] not TextEntity, skip"); i++; continue; }
+        vObjectPropertiesPlusPlugIn.DebugLog($"ApplyToTextObjects: obj[{i}] duplicating");
         var dup = te.Duplicate() as TextEntity;
-        if (dup == null) continue;
+        if (dup == null) { vObjectPropertiesPlusPlugIn.DebugLog($"ApplyToTextObjects: obj[{i}] dup==null, skip"); i++; continue; }
+        vObjectPropertiesPlusPlugIn.DebugLog($"ApplyToTextObjects: obj[{i}] calling apply");
         apply(dup);
+        vObjectPropertiesPlusPlugIn.DebugLog($"ApplyToTextObjects: obj[{i}] apply done, replacing");
         if (_doc.Objects.Replace(obj.Id, dup)) changed = true;
+        vObjectPropertiesPlusPlugIn.DebugLog($"ApplyToTextObjects: obj[{i}] replace done, changed={changed}");
+        i++;
       }
     }
     finally
     {
       if (undoRecord != 0) _doc.EndUndoRecord(undoRecord);
     }
+    vObjectPropertiesPlusPlugIn.DebugLog($"ApplyToTextObjects: done changed={changed}");
     if (changed)
     {
       _doc.Views.Redraw();
@@ -4411,13 +4420,17 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     if (_isUpdatingUi || _doc == null) return;
     string face = _textFontDrop.SelectedKey ?? "";
     if (string.IsNullOrEmpty(face)) return;
+    vObjectPropertiesPlusPlugIn.DebugLog($"ApplyTextFont: face='{face}'");
     ApplyToTextObjects(te =>
     {
       var eff = GetEffectiveTextDimStyle(te, _doc).Duplicate();
       bool bold = eff.Font?.Bold ?? false;
       bool italic = eff.Font?.Italic ?? false;
+      vObjectPropertiesPlusPlugIn.DebugLog($"ApplyTextFont: bold={bold} italic={italic} creating font");
       eff.Font = Rhino.DocObjects.Font.FromQuartetProperties(face, bold, italic);
+      vObjectPropertiesPlusPlugIn.DebugLog($"ApplyTextFont: font set, calling SetOverrideDimStyle");
       te.SetOverrideDimStyle(eff);
+      vObjectPropertiesPlusPlugIn.DebugLog($"ApplyTextFont: SetOverrideDimStyle done");
     });
   }
 
@@ -4452,19 +4465,24 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private void ApplyTextBold()
   {
     if (_isUpdatingUi || _doc == null) return;
+    vObjectPropertiesPlusPlugIn.DebugLog("ApplyTextBold: start");
     var texts = SelectedRhinoObjects()
       .Where(o => o.Geometry is TextEntity)
       .Select(o => (TextEntity)o.Geometry!)
       .ToList();
     bool allBold = texts.Count > 0 && texts.All(t => GetEffectiveTextDimStyle(t, _doc).Font?.Bold ?? false);
     bool newBold = !allBold;
+    vObjectPropertiesPlusPlugIn.DebugLog($"ApplyTextBold: newBold={newBold}");
     ApplyToTextObjects(te =>
     {
       var eff = GetEffectiveTextDimStyle(te, _doc).Duplicate();
       string faceName = eff.Font?.FaceName ?? "Arial";
       bool italic = eff.Font?.Italic ?? false;
+      vObjectPropertiesPlusPlugIn.DebugLog($"ApplyTextBold: face='{faceName}' creating font");
       eff.Font = Rhino.DocObjects.Font.FromQuartetProperties(faceName, newBold, italic);
+      vObjectPropertiesPlusPlugIn.DebugLog($"ApplyTextBold: calling SetOverrideDimStyle");
       te.SetOverrideDimStyle(eff);
+      vObjectPropertiesPlusPlugIn.DebugLog($"ApplyTextBold: SetOverrideDimStyle done");
     });
   }
 
