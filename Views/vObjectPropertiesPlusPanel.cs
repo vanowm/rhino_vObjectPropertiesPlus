@@ -69,6 +69,18 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
   private readonly Label _diameterNameLabel;
   private readonly Label _polygonSidesLabel;
   private readonly NumericStepper _polygonSidesStepper;
+
+  // Text section
+  private readonly ToggleButton _textAlignLeftBtn, _textAlignCenterBtn, _textAlignRightBtn, _textAlignAutoBtn;
+  private readonly ToggleButton _textVAlignTopBtn, _textVAlignMiddleBtn, _textVAlignBottomBtn;
+  private readonly ToggleButton _textBoldBtn, _textItalicBtn, _textUnderlineBtn;
+  private readonly TextBox _textFontBox;
+  private readonly NumericStepper _textHeightStepper;
+  private readonly DropDown _textHeightUnitDrop;
+  private readonly TextArea _textContentArea;
+  private readonly StackLayout _infoPlusSection;
+  private readonly StackLayout _textSection;
+
   private readonly Dictionary<string, Image?> _uiIconCache = new(StringComparer.OrdinalIgnoreCase);
   private readonly Dictionary<Guid, bool> _layerExpandedState = new();
   private string _currentLayerFullPath = "-";
@@ -141,6 +153,23 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
     _polygonSidesLabel = new Label { Text = "Sides", Width = LabelWidth };
     _polygonSidesStepper = NewNumericStepper(3, 360, 1, 0);
 
+    _textFontBox = new TextBox();
+    _textHeightStepper = NewNumericStepper(0.0001, 100000, 0.1, 4);
+    _textHeightStepper.Width = InfoNumericValueWidth;
+    _textHeightUnitDrop = NewUnitDropDown();
+    SetUnitDropOptions(_textHeightUnitDrop);
+    _textAlignLeftBtn = MakeToggleButton("L");
+    _textAlignCenterBtn = MakeToggleButton("C");
+    _textAlignRightBtn = MakeToggleButton("R");
+    _textAlignAutoBtn = MakeToggleButton("Auto", 40);
+    _textVAlignTopBtn = MakeToggleButton("Top", 36);
+    _textVAlignMiddleBtn = MakeToggleButton("Mid", 36);
+    _textVAlignBottomBtn = MakeToggleButton("Bot", 36);
+    _textBoldBtn = MakeToggleButton("B");
+    _textItalicBtn = MakeToggleButton("I");
+    _textUnderlineBtn = MakeToggleButton("U");
+    _textContentArea = new TextArea { AcceptsReturn = true, Height = 70 };
+
     SetUnitDropOptions(_curveMetricUnitDrop);
     SetUnitDropOptions(_radiusUnitDrop);
     SetUnitDropOptions(_diameterUnitDrop);
@@ -186,6 +215,22 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
     WireSubmitOnEnter(_radiusBox, ApplyEditedRadius);
     WireSubmitOnEnter(_diameterBox, ApplyEditedDiameter);
     _polygonSidesStepper.ValueChanged += (_, _) => { if (!_isUpdatingUi) ApplyPolygonSides(); };
+
+    _textFontBox.LostFocus += (_, _) => ApplyTextFont();
+    WireSubmitOnEnter(_textFontBox, ApplyTextFont);
+    _textHeightStepper.ValueChanged += (_, _) => { if (!_isUpdatingUi) ApplyTextHeight(); };
+    _textHeightUnitDrop.SelectedIndexChanged += (_, _) => OnUnitDropChanged(_textHeightUnitDrop, "TextHeight");
+    _textAlignLeftBtn.Click += (_, _) => { if (!_isUpdatingUi) ApplyTextHAlignment(TextHorizontalAlignment.Left); };
+    _textAlignCenterBtn.Click += (_, _) => { if (!_isUpdatingUi) ApplyTextHAlignment(TextHorizontalAlignment.Center); };
+    _textAlignRightBtn.Click += (_, _) => { if (!_isUpdatingUi) ApplyTextHAlignment(TextHorizontalAlignment.Right); };
+    _textAlignAutoBtn.Click += (_, _) => { if (!_isUpdatingUi) ApplyTextHAlignment(TextHorizontalAlignment.Auto); };
+    _textVAlignTopBtn.Click += (_, _) => { if (!_isUpdatingUi) ApplyTextVAlignment(TextVerticalAlignment.Top); };
+    _textVAlignMiddleBtn.Click += (_, _) => { if (!_isUpdatingUi) ApplyTextVAlignment(TextVerticalAlignment.Middle); };
+    _textVAlignBottomBtn.Click += (_, _) => { if (!_isUpdatingUi) ApplyTextVAlignment(TextVerticalAlignment.Bottom); };
+    _textBoldBtn.Click += (_, _) => { if (!_isUpdatingUi) ApplyTextBold(); };
+    _textItalicBtn.Click += (_, _) => { if (!_isUpdatingUi) ApplyTextItalic(); };
+    _textUnderlineBtn.Click += (_, _) => { if (!_isUpdatingUi) ApplyTextUnderline(); };
+    _textContentArea.LostFocus += (_, _) => ApplyTextContent();
 
     _layerDrop.SelectedIndexChanged += (_, _) => ApplyLayer();
     _displayColorDrop.SelectedIndexChanged += (_, _) => ApplyDisplayColorSource();
@@ -277,6 +322,36 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
       }
     };
 
+    _infoPlusSection = new StackLayout
+    {
+      Items = { NewSectionLabel("Info+"), plusTable, NewRule() }
+    };
+
+    var textTable = new TableLayout
+    {
+      Spacing = new Eto.Drawing.Size(4, 1),
+      Padding = new Eto.Drawing.Padding(10, 2, 6, 2),
+      Rows =
+      {
+        NewValueRow("Font", _textFontBox),
+        NewValueWithUnitDropRow("Height", _textHeightStepper, _textHeightUnitDrop),
+        NewTextAlignRow(),
+        NewTextStyleRow(),
+      }
+    };
+
+    _textSection = new StackLayout
+    {
+      Visible = false,
+      Items =
+      {
+        NewSectionLabel("Text"),
+        textTable,
+        new StackLayoutItem(new Panel { Content = _textContentArea, Padding = new Eto.Drawing.Padding(10, 2, 6, 2) }, false),
+        NewRule()
+      }
+    };
+
     Content = new StackLayout
     {
       Spacing = 2,
@@ -286,9 +361,8 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
         NewSectionLabel("Object"),
         objectTable,
         NewRule(),
-        NewSectionLabel("Info+"),
-        plusTable,
-        NewRule(),
+        _infoPlusSection,
+        _textSection,
         NewSectionLabel("Render Mesh Settings"),
         meshTable,
         NewRule(),
@@ -471,6 +545,7 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
       _densityStepper.Value = -1;
 
     List<Curve> infoCurves = GetInfoCurvesForSelection(objectList, out bool hasSegmentSelection);
+    UpdateTextSection(objectList, doc);
     _curveMetricBox.ReadOnly = hasSegmentSelection;
     _radiusBox.ReadOnly = hasSegmentSelection;
     _diameterBox.ReadOnly = hasSegmentSelection;
@@ -785,6 +860,21 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
     _polygonSidesLabel.Visible = false;
     _polygonSidesStepper.Visible = false;
     DisableRectangleSideHighlight();
+
+    _infoPlusSection.Visible = true;
+    _textSection.Visible = false;
+    _textFontBox.Text = "";
+    _textContentArea.Text = "";
+    _textAlignLeftBtn.Checked = false;
+    _textAlignCenterBtn.Checked = false;
+    _textAlignRightBtn.Checked = false;
+    _textAlignAutoBtn.Checked = false;
+    _textVAlignTopBtn.Checked = false;
+    _textVAlignMiddleBtn.Checked = false;
+    _textVAlignBottomBtn.Checked = false;
+    _textBoldBtn.Checked = false;
+    _textItalicBtn.Checked = false;
+    _textUnderlineBtn.Checked = false;
   }
 
   private void EnsureSegmentReadOnlyInfoBoxesAreSelectable(bool hasSegmentSelection)
@@ -4149,5 +4239,239 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
       apply();
       e.Handled = true;
     };
+  }
+
+  // ── Text section helpers ─────────────────────────────────────────────────
+
+  private static ToggleButton MakeToggleButton(string text, int width = 28)
+    => new ToggleButton { Text = text, Width = width, Height = RowHeight };
+
+  private TableRow NewTextAlignRow()
+  {
+    var row = new StackLayout
+    {
+      Orientation = Orientation.Horizontal,
+      Spacing = 2,
+      Items =
+      {
+        new StackLayoutItem(_textAlignLeftBtn, false),
+        new StackLayoutItem(_textAlignCenterBtn, false),
+        new StackLayoutItem(_textAlignRightBtn, false),
+        new StackLayoutItem(_textAlignAutoBtn, false),
+        new StackLayoutItem(new Panel { Width = 6 }, false),
+        new StackLayoutItem(_textVAlignTopBtn, false),
+        new StackLayoutItem(_textVAlignMiddleBtn, false),
+        new StackLayoutItem(_textVAlignBottomBtn, false),
+      }
+    };
+    return NewBorderedRow(new Label { Text = "Alignment", Width = LabelWidth }, row);
+  }
+
+  private TableRow NewTextStyleRow()
+  {
+    var row = new StackLayout
+    {
+      Orientation = Orientation.Horizontal,
+      Spacing = 2,
+      Items =
+      {
+        new StackLayoutItem(_textBoldBtn, false),
+        new StackLayoutItem(_textItalicBtn, false),
+        new StackLayoutItem(_textUnderlineBtn, false),
+      }
+    };
+    return NewBorderedRow(new Label { Text = "Style", Width = LabelWidth }, row);
+  }
+
+  private static DimensionStyle GetEffectiveTextDimStyle(TextEntity te, RhinoDoc? doc)
+  {
+    if (doc == null) return new DimensionStyle();
+    var baseId = te.DimensionStyleId != Guid.Empty ? te.DimensionStyleId : doc.DimStyles.Current.Id;
+    var parent = doc.DimStyles.FindId(baseId) ?? doc.DimStyles.Current;
+    return te.GetDimensionStyle(parent);
+  }
+
+  private void ApplyToTextObjects(Action<TextEntity> apply)
+  {
+    if (_doc == null) return;
+    uint undoRecord = _doc.BeginUndoRecord("Object+ Text");
+    bool changed = false;
+    try
+    {
+      foreach (var obj in SelectedRhinoObjects())
+      {
+        if (obj.Geometry is not TextEntity te) continue;
+        var dup = te.Duplicate() as TextEntity;
+        if (dup == null) continue;
+        apply(dup);
+        if (_doc.Objects.Replace(obj.Id, dup)) changed = true;
+      }
+    }
+    finally
+    {
+      if (undoRecord != 0) _doc.EndUndoRecord(undoRecord);
+    }
+    if (changed)
+    {
+      _doc.Views.Redraw();
+      RefreshFromCurrentSelection();
+    }
+  }
+
+  private void UpdateTextSection(List<RhinoObject> objectList, RhinoDoc? doc)
+  {
+    bool isTextOnly = objectList.Count > 0 && objectList.All(o => o.Geometry is TextEntity);
+    _infoPlusSection.Visible = !isTextOnly;
+    _textSection.Visible = isTextOnly;
+    if (!isTextOnly) return;
+
+    _isUpdatingUi = true;
+    try
+    {
+      var texts = objectList
+        .Select(o => o.Geometry as TextEntity)
+        .Where(t => t != null).Cast<TextEntity>().ToList();
+      if (texts.Count == 0) return;
+
+      var fontNames = texts.Select(t => GetEffectiveTextDimStyle(t, doc).Font?.FaceName ?? "").Distinct().ToList();
+      _textFontBox.Text = fontNames.Count == 1 ? fontNames[0] : "(varies)";
+
+      var modelUnits = doc?.ModelUnitSystem ?? UnitSystem.None;
+      var units = GetSelectedUnitSystem(_textHeightUnitDrop, doc);
+      var heights = texts.Select(t => ConvertLength(GetEffectiveTextDimStyle(t, doc).TextHeight, modelUnits, units)).ToList();
+      bool heightsSame = heights.Count > 0 && heights.All(h => RhinoMath.EpsilonEquals(h, heights[0], RhinoMath.SqrtEpsilon));
+      _textHeightStepper.Value = heightsSame ? heights[0] : 0;
+      _textHeightStepper.Enabled = true;
+
+      var hAligns = texts.Select(t => t.TextHorizontalAlignment).Distinct().ToList();
+      _textAlignLeftBtn.Checked = hAligns.Count == 1 && hAligns[0] == TextHorizontalAlignment.Left;
+      _textAlignCenterBtn.Checked = hAligns.Count == 1 && hAligns[0] == TextHorizontalAlignment.Center;
+      _textAlignRightBtn.Checked = hAligns.Count == 1 && hAligns[0] == TextHorizontalAlignment.Right;
+      _textAlignAutoBtn.Checked = hAligns.Count == 1 && hAligns[0] == TextHorizontalAlignment.Auto;
+
+      var vAligns = texts.Select(t => t.TextVerticalAlignment).Distinct().ToList();
+      _textVAlignTopBtn.Checked = vAligns.Count == 1 && vAligns[0] == TextVerticalAlignment.Top;
+      _textVAlignMiddleBtn.Checked = vAligns.Count == 1 && vAligns[0] == TextVerticalAlignment.Middle;
+      _textVAlignBottomBtn.Checked = vAligns.Count == 1 && vAligns[0] == TextVerticalAlignment.Bottom;
+
+      var bolds = texts.Select(t => GetEffectiveTextDimStyle(t, doc).Font?.Bold ?? false).Distinct().ToList();
+      var italics = texts.Select(t => GetEffectiveTextDimStyle(t, doc).Font?.Italic ?? false).Distinct().ToList();
+      var underlines = texts.Select(t => GetEffectiveTextDimStyle(t, doc).TextUnderlined).Distinct().ToList();
+      _textBoldBtn.Checked = bolds.Count == 1 && bolds[0];
+      _textItalicBtn.Checked = italics.Count == 1 && italics[0];
+      _textUnderlineBtn.Checked = underlines.Count == 1 && underlines[0];
+
+      var contents = texts.Select(t => t.PlainText ?? "").Distinct().ToList();
+      _textContentArea.Text = contents.Count == 1 ? contents[0] : "";
+    }
+    finally
+    {
+      _isUpdatingUi = false;
+    }
+  }
+
+  private void ApplyTextFont()
+  {
+    if (_isUpdatingUi || _doc == null) return;
+    string face = _textFontBox.Text.Trim();
+    if (string.IsNullOrEmpty(face)) return;
+    ApplyToTextObjects(te =>
+    {
+      var eff = GetEffectiveTextDimStyle(te, _doc).Duplicate();
+      bool bold = eff.Font?.Bold ?? false;
+      bool italic = eff.Font?.Italic ?? false;
+      eff.Font = Rhino.DocObjects.Font.FromQuartetProperties(face, bold, italic);
+      te.SetOverrideDimStyle(eff);
+    });
+  }
+
+  private void ApplyTextHeight()
+  {
+    if (_isUpdatingUi || _doc == null) return;
+    double h = _textHeightStepper.Value;
+    if (h <= 0) return;
+    var modelUnits = _doc.ModelUnitSystem;
+    var units = GetSelectedUnitSystem(_textHeightUnitDrop, _doc);
+    double hModel = ConvertLength(h, units, modelUnits);
+    ApplyToTextObjects(te =>
+    {
+      var eff = GetEffectiveTextDimStyle(te, _doc).Duplicate();
+      eff.TextHeight = Math.Max(hModel, RhinoMath.ZeroTolerance);
+      te.SetOverrideDimStyle(eff);
+    });
+  }
+
+  private void ApplyTextHAlignment(TextHorizontalAlignment alignment)
+  {
+    if (_isUpdatingUi || _doc == null) return;
+    ApplyToTextObjects(te => { te.TextHorizontalAlignment = alignment; });
+  }
+
+  private void ApplyTextVAlignment(TextVerticalAlignment alignment)
+  {
+    if (_isUpdatingUi || _doc == null) return;
+    ApplyToTextObjects(te => { te.TextVerticalAlignment = alignment; });
+  }
+
+  private void ApplyTextBold()
+  {
+    if (_isUpdatingUi || _doc == null) return;
+    var texts = SelectedRhinoObjects()
+      .Where(o => o.Geometry is TextEntity)
+      .Select(o => (TextEntity)o.Geometry!)
+      .ToList();
+    bool allBold = texts.Count > 0 && texts.All(t => GetEffectiveTextDimStyle(t, _doc).Font?.Bold ?? false);
+    bool newBold = !allBold;
+    ApplyToTextObjects(te =>
+    {
+      var eff = GetEffectiveTextDimStyle(te, _doc).Duplicate();
+      string faceName = eff.Font?.FaceName ?? "Arial";
+      bool italic = eff.Font?.Italic ?? false;
+      eff.Font = Rhino.DocObjects.Font.FromQuartetProperties(faceName, newBold, italic);
+      te.SetOverrideDimStyle(eff);
+    });
+  }
+
+  private void ApplyTextItalic()
+  {
+    if (_isUpdatingUi || _doc == null) return;
+    var texts = SelectedRhinoObjects()
+      .Where(o => o.Geometry is TextEntity)
+      .Select(o => (TextEntity)o.Geometry!)
+      .ToList();
+    bool allItalic = texts.Count > 0 && texts.All(t => GetEffectiveTextDimStyle(t, _doc).Font?.Italic ?? false);
+    bool newItalic = !allItalic;
+    ApplyToTextObjects(te =>
+    {
+      var eff = GetEffectiveTextDimStyle(te, _doc).Duplicate();
+      string faceName = eff.Font?.FaceName ?? "Arial";
+      bool bold = eff.Font?.Bold ?? false;
+      eff.Font = Rhino.DocObjects.Font.FromQuartetProperties(faceName, bold, newItalic);
+      te.SetOverrideDimStyle(eff);
+    });
+  }
+
+  private void ApplyTextUnderline()
+  {
+    if (_isUpdatingUi || _doc == null) return;
+    var texts = SelectedRhinoObjects()
+      .Where(o => o.Geometry is TextEntity)
+      .Select(o => (TextEntity)o.Geometry!)
+      .ToList();
+    bool allUnderlined = texts.Count > 0 && texts.All(t => GetEffectiveTextDimStyle(t, _doc).TextUnderlined);
+    bool newUnderlined = !allUnderlined;
+    ApplyToTextObjects(te =>
+    {
+      var eff = GetEffectiveTextDimStyle(te, _doc).Duplicate();
+      eff.TextUnderlined = newUnderlined;
+      te.SetOverrideDimStyle(eff);
+    });
+  }
+
+  private void ApplyTextContent()
+  {
+    if (_isUpdatingUi || _doc == null) return;
+    string content = _textContentArea.Text ?? "";
+    ApplyToTextObjects(te => { te.PlainText = content; });
   }
 }
