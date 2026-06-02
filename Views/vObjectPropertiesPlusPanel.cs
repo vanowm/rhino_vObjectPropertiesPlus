@@ -20,7 +20,7 @@ namespace vObjectPropertiesPlus.Views;
 
 [SupportedOSPlatform("windows")]
 [System.Runtime.InteropServices.Guid("B827CFBD-288D-473A-B31F-E0D36D57F982")]
-internal sealed class vObjectPropertiesPlusPanel : Panel
+public sealed class vObjectPropertiesPlusPanel : Panel
 {
   private const int LabelWidth = 122;
   private const int ValueWidth = 102;
