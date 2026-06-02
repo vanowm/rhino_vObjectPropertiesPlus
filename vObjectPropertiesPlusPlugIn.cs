@@ -37,9 +37,42 @@ public class vObjectPropertiesPlusPlugIn : PlugIn
     RhinoApp.WriteLine($"{LocalPlugInName} v{versionText}");
     DebugLog("OnLoad: plugin loaded.");
 
-    Panels.RegisterPanel(this, typeof(Views.vObjectPropertiesPlusPanel), "Object+", LoadPanelIcon());
+    var panelGuid = typeof(Views.vObjectPropertiesPlusPanel).GUID;
+    DebugLog($"OnLoad: registering panel GUID={panelGuid}");
+    try
+    {
+      Panels.RegisterPanel(this, typeof(Views.vObjectPropertiesPlusPanel), "Object+", LoadPanelIcon());
+      DebugLog("OnLoad: RegisterPanel succeeded.");
+    }
+    catch (Exception ex)
+    {
+      DebugLog($"OnLoad: RegisterPanel FAILED: {ex}");
+    }
+
+    // Open the panel the first time (or whenever it is not already visible)
+    RhinoApp.Idle += OpenPanelOnFirstIdle;
 
     return LoadReturnCode.Success;
+  }
+
+  private static void OpenPanelOnFirstIdle(object? sender, EventArgs e)
+  {
+    RhinoApp.Idle -= OpenPanelOnFirstIdle;
+    var doc = RhinoDoc.ActiveDoc;
+    var panelGuid = typeof(Views.vObjectPropertiesPlusPanel).GUID;
+    DebugLog($"OpenPanelOnFirstIdle: doc={(doc?.Name ?? "null")} panelGuid={panelGuid}");
+    try
+    {
+      if (doc != null)
+        Panels.OpenPanel(panelGuid);
+      else
+        Panels.OpenPanel(panelGuid);
+      DebugLog("OpenPanelOnFirstIdle: OpenPanel called.");
+    }
+    catch (Exception ex)
+    {
+      DebugLog($"OpenPanelOnFirstIdle: OpenPanel FAILED: {ex}");
+    }
   }
 
   private static System.Drawing.Icon LoadPanelIcon()
