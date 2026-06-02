@@ -4376,7 +4376,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
         var baseId = t.DimensionStyleId != Guid.Empty ? t.DimensionStyleId : doc.DimStyles.Current.Id;
         var parent = doc.DimStyles.FindId(baseId) ?? doc.DimStyles.Current;
         var font = t.GetDimensionStyle(parent).Font ?? parent.Font;
-        return font?.FaceName?.Replace(" Regular", "").Trim() ?? "";
+        return font?.EnglishFamilyName ?? font?.FamilyName ?? "";
       }).Distinct().ToList();
       string fontKey = fontNames.Count == 1 ? fontNames[0] : "";
       _textFontDrop.SelectedKey = fontKey;
@@ -4476,7 +4476,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     ApplyToTextObjects(te =>
     {
       var eff = GetEffectiveTextDimStyle(te, _doc).Duplicate();
-      string faceName = eff.Font?.FaceName ?? "Arial";
+      string faceName = eff.Font?.EnglishFamilyName ?? eff.Font?.FamilyName ?? "Arial";
       bool italic = eff.Font?.Italic ?? false;
       vObjectPropertiesPlusPlugIn.DebugLog($"ApplyTextBold: face='{faceName}' creating font");
       eff.Font = Rhino.DocObjects.Font.FromQuartetProperties(faceName, newBold, italic);
@@ -4498,7 +4498,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     ApplyToTextObjects(te =>
     {
       var eff = GetEffectiveTextDimStyle(te, _doc).Duplicate();
-      string faceName = eff.Font?.FaceName ?? "Arial";
+      string faceName = eff.Font?.EnglishFamilyName ?? eff.Font?.FamilyName ?? "Arial";
       bool bold = eff.Font?.Bold ?? false;
       eff.Font = Rhino.DocObjects.Font.FromQuartetProperties(faceName, bold, newItalic);
       te.SetOverrideDimStyle(eff);
