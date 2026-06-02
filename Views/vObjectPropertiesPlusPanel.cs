@@ -907,6 +907,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _textSection.Visible = false;
     _textFontDrop.SelectedIndex = -1;
     _textContentArea.Text = "";
+    _textContentArea.Font = new Eto.Drawing.Font(SystemFont.Default, 9f);
     _textAlignLeftBtn.Checked = false;
     _textAlignCenterBtn.Checked = false;
     _textAlignRightBtn.Checked = false;
@@ -4392,6 +4393,15 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       _textBoldBtn.Checked = bolds.Count == 1 && bolds[0];
       _textItalicBtn.Checked = italics.Count == 1 && italics[0];
       _textUnderlineBtn.Checked = underlines.Count == 1 && underlines[0];
+
+      {
+        bool tb = bolds.Count == 1 && bolds[0];
+        bool ti = italics.Count == 1 && italics[0];
+        bool tu = underlines.Count == 1 && underlines[0];
+        string tf = fontKey.Length > 0 ? fontKey : new Eto.Drawing.Font(SystemFont.Default).FamilyName;
+        var ts = (tb ? FontStyle.Bold : FontStyle.None) | (ti ? FontStyle.Italic : FontStyle.None);
+        _textContentArea.Font = new Eto.Drawing.Font(tf, 9f, ts, tu ? FontDecoration.Underline : FontDecoration.None);
+      }
 
       var contents = texts.Select(t => t.PlainText ?? "").Distinct().ToList();
       _textContentArea.Text = contents.Count == 1 ? contents[0] : "";

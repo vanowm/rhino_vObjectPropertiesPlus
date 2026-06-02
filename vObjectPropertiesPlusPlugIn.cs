@@ -55,6 +55,11 @@ public class vObjectPropertiesPlusPlugIn : PlugIn
     return LoadReturnCode.Success;
   }
 
+  protected override void ObjectPropertiesPages(ObjectPropertiesPageCollection collection)
+  {
+    collection.Add(new Views.vObjectPropertiesPlusLauncherPage());
+  }
+
   private static void OpenPanelOnFirstIdle(object? sender, EventArgs e)
   {
     RhinoApp.Idle -= OpenPanelOnFirstIdle;
