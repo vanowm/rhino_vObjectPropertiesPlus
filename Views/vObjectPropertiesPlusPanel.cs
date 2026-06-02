@@ -153,7 +153,7 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
     _polygonSidesLabel = new Label { Text = "Sides", Width = LabelWidth };
     _polygonSidesStepper = NewNumericStepper(3, 360, 1, 0);
 
-    _textFontDrop = new DropDown { Height = RowHeight };
+    _textFontDrop = new DropDown { Height = RowHeight, Width = ValueWidth };
     foreach (var ff in System.Drawing.FontFamily.Families.OrderBy(f => f.Name))
       _textFontDrop.Items.Add(new ListItem { Text = ff.Name, Key = ff.Name });
     _textHeightStepper = NewNumericStepper(0.0001, 100000, 0.1, 4);
@@ -372,7 +372,7 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
         NewSectionLabel("Text"),
         textTable,
         alignStylePanel,
-        new StackLayoutItem(new Panel { Content = _textContentArea, Padding = new Eto.Drawing.Padding(10, 2, 6, 2) }, true),
+        new Panel { Content = _textContentArea, Padding = new Eto.Drawing.Padding(10, 2, 6, 2) },
         NewRule()
       }
     };
