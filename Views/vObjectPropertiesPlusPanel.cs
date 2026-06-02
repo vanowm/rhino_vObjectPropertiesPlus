@@ -4319,35 +4319,46 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     return te.GetDimensionStyle(parent);
   }
 
+  // Creates a fresh (id-less) DimensionStyle override with only our three managed fields set.
+  // Using new DimensionStyle() ensures only the explicitly set fields are treated as overrides.
+  private static DimensionStyle MakeTextOverride(
+    TextEntity te, RhinoDoc doc,
+    bool? newBold = null, bool? newItalic = null, string? newFamily = null,
+    double? newHeight = null, bool? newUnderlined = null)
+  {
+    var baseId = te.DimensionStyleId != Guid.Empty ? te.DimensionStyleId : doc.DimStyles.Current.Id;
+    var parent = doc.DimStyles.FindId(baseId) ?? doc.DimStyles.Current;
+    var eff = te.GetDimensionStyle(parent);
+    string family = newFamily ?? eff.Font?.EnglishFamilyName ?? "Arial";
+    bool bold   = newBold    ?? eff.Font?.Bold   ?? false;
+    bool italic = newItalic  ?? eff.Font?.Italic ?? false;
+    var ov = new DimensionStyle();
+    ov.Font          = Rhino.DocObjects.Font.FromQuartetProperties(family, bold, italic);
+    ov.TextHeight    = newHeight    ?? eff.TextHeight;
+    ov.TextUnderlined = newUnderlined ?? eff.TextUnderlined;
+    return ov;
+  }
+
   private void ApplyToTextObjects(Action<TextEntity> apply)
   {
     if (_doc == null) return;
-    vObjectPropertiesPlusPlugIn.DebugLog("ApplyToTextObjects: start");
     uint undoRecord = _doc.BeginUndoRecord("Object+ Text");
     bool changed = false;
     try
     {
-      int i = 0;
       foreach (var obj in SelectedRhinoObjects())
       {
-        vObjectPropertiesPlusPlugIn.DebugLog($"ApplyToTextObjects: obj[{i}] id={obj.Id}");
-        if (obj.Geometry is not TextEntity te) { vObjectPropertiesPlusPlugIn.DebugLog($"ApplyToTextObjects: obj[{i}] not TextEntity, skip"); i++; continue; }
-        vObjectPropertiesPlusPlugIn.DebugLog($"ApplyToTextObjects: obj[{i}] duplicating");
+        if (obj.Geometry is not TextEntity te) continue;
         var dup = te.Duplicate() as TextEntity;
-        if (dup == null) { vObjectPropertiesPlusPlugIn.DebugLog($"ApplyToTextObjects: obj[{i}] dup==null, skip"); i++; continue; }
-        vObjectPropertiesPlusPlugIn.DebugLog($"ApplyToTextObjects: obj[{i}] calling apply");
+        if (dup == null) continue;
         apply(dup);
-        vObjectPropertiesPlusPlugIn.DebugLog($"ApplyToTextObjects: obj[{i}] apply done, replacing");
         if (_doc.Objects.Replace(obj.Id, dup)) changed = true;
-        vObjectPropertiesPlusPlugIn.DebugLog($"ApplyToTextObjects: obj[{i}] replace done, changed={changed}");
-        i++;
       }
     }
     finally
     {
       if (undoRecord != 0) _doc.EndUndoRecord(undoRecord);
     }
-    vObjectPropertiesPlusPlugIn.DebugLog($"ApplyToTextObjects: done changed={changed}");
     if (changed)
     {
       _doc.Views.Redraw();
@@ -4420,17 +4431,9 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     if (_isUpdatingUi || _doc == null) return;
     string face = _textFontDrop.SelectedKey ?? "";
     if (string.IsNullOrEmpty(face)) return;
-    vObjectPropertiesPlusPlugIn.DebugLog($"ApplyTextFont: face='{face}'");
     ApplyToTextObjects(te =>
     {
-      var eff = GetEffectiveTextDimStyle(te, _doc).Duplicate();
-      bool bold = eff.Font?.Bold ?? false;
-      bool italic = eff.Font?.Italic ?? false;
-      vObjectPropertiesPlusPlugIn.DebugLog($"ApplyTextFont: bold={bold} italic={italic} creating font");
-      eff.Font = Rhino.DocObjects.Font.FromQuartetProperties(face, bold, italic);
-      vObjectPropertiesPlusPlugIn.DebugLog($"ApplyTextFont: font set, calling SetOverrideDimStyle");
-      te.SetOverrideDimStyle(eff);
-      vObjectPropertiesPlusPlugIn.DebugLog($"ApplyTextFont: SetOverrideDimStyle done");
+      te.SetOverrideDimStyle(MakeTextOverride(te, _doc!, newFamily: face));
     });
   }
 
@@ -4444,9 +4447,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     double hModel = ConvertLength(h, units, modelUnits);
     ApplyToTextObjects(te =>
     {
-      var eff = GetEffectiveTextDimStyle(te, _doc).Duplicate();
-      eff.TextHeight = Math.Max(hModel, RhinoMath.ZeroTolerance);
-      te.SetOverrideDimStyle(eff);
+      te.SetOverrideDimStyle(MakeTextOverride(te, _doc!, newHeight: Math.Max(hModel, RhinoMath.ZeroTolerance)));
     });
   }
 
@@ -4465,24 +4466,15 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private void ApplyTextBold()
   {
     if (_isUpdatingUi || _doc == null) return;
-    vObjectPropertiesPlusPlugIn.DebugLog("ApplyTextBold: start");
     var texts = SelectedRhinoObjects()
       .Where(o => o.Geometry is TextEntity)
       .Select(o => (TextEntity)o.Geometry!)
       .ToList();
     bool allBold = texts.Count > 0 && texts.All(t => GetEffectiveTextDimStyle(t, _doc).Font?.Bold ?? false);
     bool newBold = !allBold;
-    vObjectPropertiesPlusPlugIn.DebugLog($"ApplyTextBold: newBold={newBold}");
     ApplyToTextObjects(te =>
     {
-      var eff = GetEffectiveTextDimStyle(te, _doc).Duplicate();
-      string faceName = eff.Font?.EnglishFamilyName ?? eff.Font?.FamilyName ?? "Arial";
-      bool italic = eff.Font?.Italic ?? false;
-      vObjectPropertiesPlusPlugIn.DebugLog($"ApplyTextBold: face='{faceName}' creating font");
-      eff.Font = Rhino.DocObjects.Font.FromQuartetProperties(faceName, newBold, italic);
-      vObjectPropertiesPlusPlugIn.DebugLog($"ApplyTextBold: calling SetOverrideDimStyle");
-      te.SetOverrideDimStyle(eff);
-      vObjectPropertiesPlusPlugIn.DebugLog($"ApplyTextBold: SetOverrideDimStyle done");
+      te.SetOverrideDimStyle(MakeTextOverride(te, _doc!, newBold: newBold));
     });
   }
 
@@ -4497,11 +4489,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     bool newItalic = !allItalic;
     ApplyToTextObjects(te =>
     {
-      var eff = GetEffectiveTextDimStyle(te, _doc).Duplicate();
-      string faceName = eff.Font?.EnglishFamilyName ?? eff.Font?.FamilyName ?? "Arial";
-      bool bold = eff.Font?.Bold ?? false;
-      eff.Font = Rhino.DocObjects.Font.FromQuartetProperties(faceName, bold, newItalic);
-      te.SetOverrideDimStyle(eff);
+      te.SetOverrideDimStyle(MakeTextOverride(te, _doc!, newItalic: newItalic));
     });
   }
 
@@ -4516,9 +4504,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     bool newUnderlined = !allUnderlined;
     ApplyToTextObjects(te =>
     {
-      var eff = GetEffectiveTextDimStyle(te, _doc).Duplicate();
-      eff.TextUnderlined = newUnderlined;
-      te.SetOverrideDimStyle(eff);
+      te.SetOverrideDimStyle(MakeTextOverride(te, _doc!, newUnderlined: newUnderlined));
     });
   }
 
