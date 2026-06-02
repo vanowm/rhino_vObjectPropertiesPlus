@@ -78,6 +78,7 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
   private readonly NumericStepper _textHeightStepper;
   private readonly DropDown _textHeightUnitDrop;
   private readonly TextArea _textContentArea;
+  private readonly UITimer _textContentTimer = new UITimer { Interval = 0.4 };
   private readonly StackLayout _infoPlusSection;
   private readonly TableLayout _textSection;
 
@@ -231,7 +232,8 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
     _textBoldBtn.Click += (_, _) => { if (!_isUpdatingUi) ApplyTextBold(); };
     _textItalicBtn.Click += (_, _) => { if (!_isUpdatingUi) ApplyTextItalic(); };
     _textUnderlineBtn.Click += (_, _) => { if (!_isUpdatingUi) ApplyTextUnderline(); };
-    _textContentArea.LostFocus += (_, _) => ApplyTextContent();
+    _textContentTimer.Elapsed += (_, _) => { _textContentTimer.Stop(); ApplyTextContent(); };
+    _textContentArea.TextChanged += (_, _) => { if (!_isUpdatingUi) { _textContentTimer.Stop(); _textContentTimer.Start(); } };
 
     _layerDrop.SelectedIndexChanged += (_, _) => ApplyLayer();
     _displayColorDrop.SelectedIndexChanged += (_, _) => ApplyDisplayColorSource();
@@ -412,8 +414,6 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
         }
       }
     };
-
-    MinimumSize = new Size(318, 0);
 
     SetEmptyState();
   }
@@ -4360,8 +4360,15 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
         .Where(t => t != null).Cast<TextEntity>().ToList();
       if (texts.Count == 0) return;
 
-      var fontNames = texts.Select(t => GetEffectiveTextDimStyle(t, doc).Font?.FaceName ?? "").Distinct().ToList();
-      string fontKey = fontNames.Count == 1 ? fontNames[0].Replace(" Regular", "").Trim() : "";
+      var fontNames = texts.Select(t =>
+      {
+        if (doc == null) return "";
+        var baseId = t.DimensionStyleId != Guid.Empty ? t.DimensionStyleId : doc.DimStyles.Current.Id;
+        var parent = doc.DimStyles.FindId(baseId) ?? doc.DimStyles.Current;
+        var font = t.GetDimensionStyle(parent).Font ?? parent.Font;
+        return font?.FaceName?.Replace(" Regular", "").Trim() ?? "";
+      }).Distinct().ToList();
+      string fontKey = fontNames.Count == 1 ? fontNames[0] : "";
       _textFontDrop.SelectedKey = fontKey;
 
       var modelUnits = doc?.ModelUnitSystem ?? UnitSystem.None;
