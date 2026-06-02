@@ -11,7 +11,6 @@ namespace vObjectPropertiesPlus;
 [System.Runtime.InteropServices.Guid("2E0E8488-399B-4D87-B845-8A486911F808")]
 public class vObjectPropertiesPlusPlugIn : PlugIn
 {
-  private Views.vObjectPropertiesPlusObjectPropertiesPage? _page;
   private static readonly object LogLock = new();
 
   public override PlugInLoadTime LoadTime => PlugInLoadTime.AtStartup;
@@ -23,13 +22,6 @@ public class vObjectPropertiesPlusPlugIn : PlugIn
   }
 
   public static vObjectPropertiesPlusPlugIn Instance { get; private set; } = null!;
-
-  protected override void ObjectPropertiesPages(ObjectPropertiesPageCollection collection)
-  {
-    _page ??= new Views.vObjectPropertiesPlusObjectPropertiesPage();
-    collection.Add(_page);
-    DebugLog("ObjectPropertiesPages: Object+ page added to collection.");
-  }
 
   protected override LoadReturnCode OnLoad(ref string errorMessage)
   {
@@ -44,7 +36,26 @@ public class vObjectPropertiesPlusPlugIn : PlugIn
 
     RhinoApp.WriteLine($"{LocalPlugInName} v{versionText}");
     DebugLog("OnLoad: plugin loaded.");
+
+    Panels.RegisterPanel(this, typeof(Views.vObjectPropertiesPlusPanel), "Object+", LoadPanelIcon());
+
     return LoadReturnCode.Success;
+  }
+
+  private static System.Drawing.Icon LoadPanelIcon()
+  {
+    try
+    {
+      string dir = Path.GetDirectoryName(typeof(vObjectPropertiesPlusPlugIn).Assembly.Location) ?? AppContext.BaseDirectory;
+      string pngPath = Path.Combine(dir, "vObjectPropertiesPlus.png");
+      if (File.Exists(pngPath))
+      {
+        using var bmp = new System.Drawing.Bitmap(pngPath);
+        return System.Drawing.Icon.FromHandle(bmp.GetHicon());
+      }
+    }
+    catch { }
+    return System.Drawing.SystemIcons.Application;
   }
 
   internal static void DebugLog(string message)

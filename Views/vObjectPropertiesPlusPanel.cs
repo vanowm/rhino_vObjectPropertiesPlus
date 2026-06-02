@@ -19,6 +19,7 @@ using Rhino.UI;
 namespace vObjectPropertiesPlus.Views;
 
 [SupportedOSPlatform("windows")]
+[System.Runtime.InteropServices.Guid("B827CFBD-288D-473A-B31F-E0D36D57F982")]
 internal sealed class vObjectPropertiesPlusPanel : Panel
 {
   private const int LabelWidth = 122;
@@ -376,7 +377,6 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
         new TableRow(new TableCell(textTable, true)),
         new TableRow(new TableCell(alignStylePanel, true)),
         new TableRow(new TableCell(new Panel { Content = _textContentArea, Padding = new Eto.Drawing.Padding(10, 2, 6, 2) }, true)),
-        new TableRow(new TableCell(NewRule(), true)),
       }
     };
 
@@ -389,18 +389,14 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
       {
         NewSectionLabel("Object"),
         objectTable,
-        NewRule(),
         _infoPlusSection,
         _textSection,
         NewSectionLabel("Render Mesh Settings"),
         meshTable,
-        NewRule(),
         NewSectionLabel("Rendering"),
         renderingTable,
-        NewRule(),
         NewSectionLabel("Isocurve Density"),
         isocurveTable,
-        NewRule(),
         new StackLayout
         {
           Orientation = Orientation.Horizontal,
@@ -415,7 +411,26 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
       }
     };
 
+    // Min width: the align+style button row controls (padding 10+6, 4×22btn + 3×2sp + 6 + 3×22btn + 2×2sp + 12 + 3×22btn + 2×2sp)
+    MinimumSize = new Size(
+      Math.Max(
+        10 + 4 * 22 + 3 * 2 + 6 + 3 * 22 + 2 * 2 + 12 + 3 * 22 + 2 * 2 + 6,
+        10 + LabelWidth + 4 + ValueWidth + 6),
+      0);
+
+    Load += (_, _) => { var d = RhinoDoc.ActiveDoc; if (d != null) RefreshFromDoc(d); };
+    RhinoDoc.SelectObjects      += (_, e) => RefreshFromDoc(e.Document);
+    RhinoDoc.DeselectObjects    += (_, e) => RefreshFromDoc(e.Document);
+    RhinoDoc.DeselectAllObjects += (_, e) => RefreshFromDoc(e.Document);
+    RhinoDoc.ModifyObjectAttributes += (_, e) => { if (e.RhinoObject?.IsSelected(false) == 1) RefreshFromDoc(e.Document); };
+
     SetEmptyState();
+  }
+
+  private void RefreshFromDoc(RhinoDoc doc)
+  {
+    var selected = doc.Objects.GetSelectedObjects(false, false).ToList();
+    Application.Instance.AsyncInvoke(() => UpdateFromSelection(doc, selected));
   }
 
   public void UpdateFromSelection(RhinoDoc? doc, IEnumerable<RhinoObject> objects)
@@ -4069,23 +4084,9 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
   private static TableRow NewBorderedRow(Control left, Control right)
   {
     return new TableRow(
-      new TableCell(WithBottomBorder(left), false),
-      new TableCell(WithBottomBorder(right), true)
+      new TableCell(left, false),
+      new TableCell(right, true)
     );
-  }
-
-  private static Control WithBottomBorder(Control control)
-  {
-    return new StackLayout
-    {
-      Orientation = Orientation.Vertical,
-      Spacing = 0,
-      Items =
-      {
-        new StackLayoutItem(control, true),
-        new StackLayoutItem(new Panel { Height = 1, BackgroundColor = Colors.Gray }, false)
-      }
-    };
   }
 
   private static TextBox NewValueBox()
