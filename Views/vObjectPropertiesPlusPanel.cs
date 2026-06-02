@@ -74,7 +74,7 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
   private readonly ToggleButton _textAlignLeftBtn, _textAlignCenterBtn, _textAlignRightBtn, _textAlignAutoBtn;
   private readonly ToggleButton _textVAlignTopBtn, _textVAlignMiddleBtn, _textVAlignBottomBtn;
   private readonly ToggleButton _textBoldBtn, _textItalicBtn, _textUnderlineBtn;
-  private readonly TextBox _textFontBox;
+  private readonly DropDown _textFontDrop;
   private readonly NumericStepper _textHeightStepper;
   private readonly DropDown _textHeightUnitDrop;
   private readonly TextArea _textContentArea;
@@ -153,7 +153,9 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
     _polygonSidesLabel = new Label { Text = "Sides", Width = LabelWidth };
     _polygonSidesStepper = NewNumericStepper(3, 360, 1, 0);
 
-    _textFontBox = new TextBox();
+    _textFontDrop = new DropDown { Height = RowHeight };
+    foreach (var ff in System.Drawing.FontFamily.Families.OrderBy(f => f.Name))
+      _textFontDrop.Items.Add(new ListItem { Text = ff.Name, Key = ff.Name });
     _textHeightStepper = NewNumericStepper(0.0001, 100000, 0.1, 4);
     _textHeightStepper.Width = InfoNumericValueWidth;
     _textHeightUnitDrop = NewUnitDropDown();
@@ -161,10 +163,10 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
     _textAlignLeftBtn = MakeToggleButton("L");
     _textAlignCenterBtn = MakeToggleButton("C");
     _textAlignRightBtn = MakeToggleButton("R");
-    _textAlignAutoBtn = MakeToggleButton("Auto", 40);
-    _textVAlignTopBtn = MakeToggleButton("Top", 36);
-    _textVAlignMiddleBtn = MakeToggleButton("Mid", 36);
-    _textVAlignBottomBtn = MakeToggleButton("Bot", 36);
+    _textAlignAutoBtn = MakeToggleButton("A", 22);
+    _textVAlignTopBtn = MakeToggleButton("T");
+    _textVAlignMiddleBtn = MakeToggleButton("M");
+    _textVAlignBottomBtn = MakeToggleButton("B");
     _textBoldBtn = MakeToggleButton("B");
     _textItalicBtn = MakeToggleButton("I");
     _textUnderlineBtn = MakeToggleButton("U");
@@ -216,8 +218,7 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
     WireSubmitOnEnter(_diameterBox, ApplyEditedDiameter);
     _polygonSidesStepper.ValueChanged += (_, _) => { if (!_isUpdatingUi) ApplyPolygonSides(); };
 
-    _textFontBox.LostFocus += (_, _) => ApplyTextFont();
-    WireSubmitOnEnter(_textFontBox, ApplyTextFont);
+    _textFontDrop.SelectedIndexChanged += (_, _) => { if (!_isUpdatingUi) ApplyTextFont(); };
     _textHeightStepper.ValueChanged += (_, _) => { if (!_isUpdatingUi) ApplyTextHeight(); };
     _textHeightUnitDrop.SelectedIndexChanged += (_, _) => OnUnitDropChanged(_textHeightUnitDrop, "TextHeight");
     _textAlignLeftBtn.Click += (_, _) => { if (!_isUpdatingUi) ApplyTextHAlignment(TextHorizontalAlignment.Left); };
@@ -333,10 +334,33 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
       Padding = new Eto.Drawing.Padding(10, 2, 6, 2),
       Rows =
       {
-        NewValueRow("Font", _textFontBox),
+        NewValueRow("Font", _textFontDrop),
         NewValueWithUnitDropRow("Height", _textHeightStepper, _textHeightUnitDrop),
-        NewTextAlignRow(),
-        NewTextStyleRow(),
+      }
+    };
+
+    var alignStylePanel = new Panel
+    {
+      Padding = new Eto.Drawing.Padding(10, 1, 6, 1),
+      Content = new StackLayout
+      {
+        Orientation = Orientation.Horizontal,
+        Spacing = 2,
+        Items =
+        {
+          new StackLayoutItem(_textAlignLeftBtn, false),
+          new StackLayoutItem(_textAlignCenterBtn, false),
+          new StackLayoutItem(_textAlignRightBtn, false),
+          new StackLayoutItem(_textAlignAutoBtn, false),
+          new StackLayoutItem(new Panel { Width = 6 }, false),
+          new StackLayoutItem(_textVAlignTopBtn, false),
+          new StackLayoutItem(_textVAlignMiddleBtn, false),
+          new StackLayoutItem(_textVAlignBottomBtn, false),
+          new StackLayoutItem(new Panel { Width = 12 }, false),
+          new StackLayoutItem(_textBoldBtn, false),
+          new StackLayoutItem(_textItalicBtn, false),
+          new StackLayoutItem(_textUnderlineBtn, false),
+        }
       }
     };
 
@@ -347,7 +371,8 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
       {
         NewSectionLabel("Text"),
         textTable,
-        new StackLayoutItem(new Panel { Content = _textContentArea, Padding = new Eto.Drawing.Padding(10, 2, 6, 2) }, false),
+        alignStylePanel,
+        new StackLayoutItem(new Panel { Content = _textContentArea, Padding = new Eto.Drawing.Padding(10, 2, 6, 2) }, true),
         NewRule()
       }
     };
@@ -863,7 +888,7 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
 
     _infoPlusSection.Visible = true;
     _textSection.Visible = false;
-    _textFontBox.Text = "";
+    _textFontDrop.SelectedIndex = -1;
     _textContentArea.Text = "";
     _textAlignLeftBtn.Checked = false;
     _textAlignCenterBtn.Checked = false;
@@ -4243,8 +4268,8 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
 
   // ── Text section helpers ─────────────────────────────────────────────────
 
-  private static ToggleButton MakeToggleButton(string text, int width = 28)
-    => new ToggleButton { Text = text, Width = width, Height = RowHeight };
+  private static ToggleButton MakeToggleButton(string text, int width = 22, int height = 18)
+    => new ToggleButton { Text = text, Width = width, Height = height };
 
   private TableRow NewTextAlignRow()
   {
@@ -4334,7 +4359,8 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
       if (texts.Count == 0) return;
 
       var fontNames = texts.Select(t => GetEffectiveTextDimStyle(t, doc).Font?.FaceName ?? "").Distinct().ToList();
-      _textFontBox.Text = fontNames.Count == 1 ? fontNames[0] : "(varies)";
+      string fontKey = fontNames.Count == 1 ? fontNames[0].Replace(" Regular", "").Trim() : "";
+      _textFontDrop.SelectedKey = fontKey;
 
       var modelUnits = doc?.ModelUnitSystem ?? UnitSystem.None;
       var units = GetSelectedUnitSystem(_textHeightUnitDrop, doc);
@@ -4373,7 +4399,7 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
   private void ApplyTextFont()
   {
     if (_isUpdatingUi || _doc == null) return;
-    string face = _textFontBox.Text.Trim();
+    string face = _textFontDrop.SelectedKey ?? "";
     if (string.IsNullOrEmpty(face)) return;
     ApplyToTextObjects(te =>
     {
