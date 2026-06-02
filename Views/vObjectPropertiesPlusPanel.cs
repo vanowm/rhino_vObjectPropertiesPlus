@@ -79,7 +79,7 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
   private readonly DropDown _textHeightUnitDrop;
   private readonly TextArea _textContentArea;
   private readonly StackLayout _infoPlusSection;
-  private readonly StackLayout _textSection;
+  private readonly TableLayout _textSection;
 
   private readonly Dictionary<string, Image?> _uiIconCache = new(StringComparer.OrdinalIgnoreCase);
   private readonly Dictionary<Guid, bool> _layerExpandedState = new();
@@ -364,17 +364,17 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
       }
     };
 
-    _textSection = new StackLayout
+    _textSection = new TableLayout
     {
       Visible = false,
-      HorizontalContentAlignment = HorizontalAlignment.Stretch,
-      Items =
+      Spacing = new Eto.Drawing.Size(0, 0),
+      Rows =
       {
-        NewSectionLabel("Text"),
-        textTable,
-        alignStylePanel,
-        new Panel { Content = _textContentArea, Padding = new Eto.Drawing.Padding(10, 2, 6, 2) },
-        NewRule()
+        new TableRow(new TableCell(NewSectionLabel("Text"), true)),
+        new TableRow(new TableCell(textTable, true)),
+        new TableRow(new TableCell(alignStylePanel, true)),
+        new TableRow(new TableCell(new Panel { Content = _textContentArea, Padding = new Eto.Drawing.Padding(10, 2, 6, 2) }, true)),
+        new TableRow(new TableCell(NewRule(), true)),
       }
     };
 
