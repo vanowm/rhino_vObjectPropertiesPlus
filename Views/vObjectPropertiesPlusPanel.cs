@@ -908,6 +908,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _textFontDrop.SelectedIndex = -1;
     _textContentArea.Text = "";
     _textContentArea.Font = new Eto.Drawing.Font(SystemFont.Default, 9f);
+    _textContentArea.TextAlignment = TextAlignment.Left;
     _textAlignLeftBtn.Checked = false;
     _textAlignCenterBtn.Checked = false;
     _textAlignRightBtn.Checked = false;
@@ -4381,6 +4382,9 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       _textAlignCenterBtn.Checked = hAligns.Count == 1 && hAligns[0] == TextHorizontalAlignment.Center;
       _textAlignRightBtn.Checked = hAligns.Count == 1 && hAligns[0] == TextHorizontalAlignment.Right;
       _textAlignAutoBtn.Checked = hAligns.Count == 1 && hAligns[0] == TextHorizontalAlignment.Auto;
+      _textContentArea.TextAlignment = (hAligns.Count == 1 && hAligns[0] == TextHorizontalAlignment.Center) ? TextAlignment.Center
+                                     : (hAligns.Count == 1 && hAligns[0] == TextHorizontalAlignment.Right)  ? TextAlignment.Right
+                                     : TextAlignment.Left;
 
       var vAligns = texts.Select(t => t.TextVerticalAlignment).Distinct().ToList();
       _textVAlignTopBtn.Checked = vAligns.Count == 1 && vAligns[0] == TextVerticalAlignment.Top;
