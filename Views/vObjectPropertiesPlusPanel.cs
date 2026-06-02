@@ -4319,25 +4319,6 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     return te.GetDimensionStyle(parent);
   }
 
-  // Creates a fresh (id-less) DimensionStyle override with only our three managed fields set.
-  // Using new DimensionStyle() ensures only the explicitly set fields are treated as overrides.
-  private static DimensionStyle MakeTextOverride(
-    TextEntity te, RhinoDoc doc,
-    bool? newBold = null, bool? newItalic = null, string? newFamily = null,
-    double? newHeight = null, bool? newUnderlined = null)
-  {
-    var baseId = te.DimensionStyleId != Guid.Empty ? te.DimensionStyleId : doc.DimStyles.Current.Id;
-    var parent = doc.DimStyles.FindId(baseId) ?? doc.DimStyles.Current;
-    var eff = te.GetDimensionStyle(parent);
-    string family = newFamily ?? eff.Font?.EnglishFamilyName ?? "Arial";
-    bool bold   = newBold    ?? eff.Font?.Bold   ?? false;
-    bool italic = newItalic  ?? eff.Font?.Italic ?? false;
-    var ov = new DimensionStyle();
-    ov.Font          = Rhino.DocObjects.Font.FromQuartetProperties(family, bold, italic);
-    ov.TextHeight    = newHeight    ?? eff.TextHeight;
-    ov.TextUnderlined = newUnderlined ?? eff.TextUnderlined;
-    return ov;
-  }
 
   private void ApplyToTextObjects(Action<TextEntity> apply)
   {
@@ -4382,13 +4363,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       if (texts.Count == 0) return;
 
       var fontNames = texts.Select(t =>
-      {
-        if (doc == null) return "";
-        var baseId = t.DimensionStyleId != Guid.Empty ? t.DimensionStyleId : doc.DimStyles.Current.Id;
-        var parent = doc.DimStyles.FindId(baseId) ?? doc.DimStyles.Current;
-        var font = t.GetDimensionStyle(parent).Font ?? parent.Font;
-        return font?.EnglishFamilyName ?? font?.FamilyName ?? "";
-      }).Distinct().ToList();
+        t.FirstCharFont?.EnglishFamilyName ?? t.Font?.EnglishFamilyName ?? ""
+      ).Distinct().ToList();
       string fontKey = fontNames.Count == 1 ? fontNames[0] : "";
       _textFontDrop.SelectedKey = fontKey;
 
@@ -4410,9 +4386,9 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       _textVAlignMiddleBtn.Checked = vAligns.Count == 1 && vAligns[0] == TextVerticalAlignment.Middle;
       _textVAlignBottomBtn.Checked = vAligns.Count == 1 && vAligns[0] == TextVerticalAlignment.Bottom;
 
-      var bolds = texts.Select(t => GetEffectiveTextDimStyle(t, doc).Font?.Bold ?? false).Distinct().ToList();
-      var italics = texts.Select(t => GetEffectiveTextDimStyle(t, doc).Font?.Italic ?? false).Distinct().ToList();
-      var underlines = texts.Select(t => GetEffectiveTextDimStyle(t, doc).TextUnderlined).Distinct().ToList();
+      var bolds = texts.Select(t => t.IsAllBold()).Distinct().ToList();
+      var italics = texts.Select(t => t.IsAllItalic()).Distinct().ToList();
+      var underlines = texts.Select(t => t.IsAllUnderlined()).Distinct().ToList();
       _textBoldBtn.Checked = bolds.Count == 1 && bolds[0];
       _textItalicBtn.Checked = italics.Count == 1 && italics[0];
       _textUnderlineBtn.Checked = underlines.Count == 1 && underlines[0];
@@ -4431,10 +4407,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     if (_isUpdatingUi || _doc == null) return;
     string face = _textFontDrop.SelectedKey ?? "";
     if (string.IsNullOrEmpty(face)) return;
-    ApplyToTextObjects(te =>
-    {
-      te.SetOverrideDimStyle(MakeTextOverride(te, _doc!, newFamily: face));
-    });
+    ApplyToTextObjects(te => te.SetFacename(true, face));
   }
 
   private void ApplyTextHeight()
@@ -4445,10 +4418,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     var modelUnits = _doc.ModelUnitSystem;
     var units = GetSelectedUnitSystem(_textHeightUnitDrop, _doc);
     double hModel = ConvertLength(h, units, modelUnits);
-    ApplyToTextObjects(te =>
-    {
-      te.SetOverrideDimStyle(MakeTextOverride(te, _doc!, newHeight: Math.Max(hModel, RhinoMath.ZeroTolerance)));
-    });
+    ApplyToTextObjects(te => { te.TextHeight = Math.Max(hModel, RhinoMath.ZeroTolerance); });
   }
 
   private void ApplyTextHAlignment(TextHorizontalAlignment alignment)
@@ -4466,46 +4436,22 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private void ApplyTextBold()
   {
     if (_isUpdatingUi || _doc == null) return;
-    var texts = SelectedRhinoObjects()
-      .Where(o => o.Geometry is TextEntity)
-      .Select(o => (TextEntity)o.Geometry!)
-      .ToList();
-    bool allBold = texts.Count > 0 && texts.All(t => GetEffectiveTextDimStyle(t, _doc).Font?.Bold ?? false);
-    bool newBold = !allBold;
-    ApplyToTextObjects(te =>
-    {
-      te.SetOverrideDimStyle(MakeTextOverride(te, _doc!, newBold: newBold));
-    });
+    bool allBold = SelectedRhinoObjects().Where(o => o.Geometry is TextEntity).All(o => ((TextEntity)o.Geometry!).IsAllBold());
+    ApplyToTextObjects(te => te.SetBold(!allBold));
   }
 
   private void ApplyTextItalic()
   {
     if (_isUpdatingUi || _doc == null) return;
-    var texts = SelectedRhinoObjects()
-      .Where(o => o.Geometry is TextEntity)
-      .Select(o => (TextEntity)o.Geometry!)
-      .ToList();
-    bool allItalic = texts.Count > 0 && texts.All(t => GetEffectiveTextDimStyle(t, _doc).Font?.Italic ?? false);
-    bool newItalic = !allItalic;
-    ApplyToTextObjects(te =>
-    {
-      te.SetOverrideDimStyle(MakeTextOverride(te, _doc!, newItalic: newItalic));
-    });
+    bool allItalic = SelectedRhinoObjects().Where(o => o.Geometry is TextEntity).All(o => ((TextEntity)o.Geometry!).IsAllItalic());
+    ApplyToTextObjects(te => te.SetItalic(!allItalic));
   }
 
   private void ApplyTextUnderline()
   {
     if (_isUpdatingUi || _doc == null) return;
-    var texts = SelectedRhinoObjects()
-      .Where(o => o.Geometry is TextEntity)
-      .Select(o => (TextEntity)o.Geometry!)
-      .ToList();
-    bool allUnderlined = texts.Count > 0 && texts.All(t => GetEffectiveTextDimStyle(t, _doc).TextUnderlined);
-    bool newUnderlined = !allUnderlined;
-    ApplyToTextObjects(te =>
-    {
-      te.SetOverrideDimStyle(MakeTextOverride(te, _doc!, newUnderlined: newUnderlined));
-    });
+    bool allUnderlined = SelectedRhinoObjects().Where(o => o.Geometry is TextEntity).All(o => ((TextEntity)o.Geometry!).IsAllUnderlined());
+    ApplyToTextObjects(te => te.SetUnderline(!allUnderlined));
   }
 
   private void ApplyTextContent()
