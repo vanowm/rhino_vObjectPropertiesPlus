@@ -382,6 +382,7 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
     {
       Spacing = 2,
       Padding = new Eto.Drawing.Padding(0, 2, 0, 2),
+      HorizontalContentAlignment = HorizontalAlignment.Stretch,
       Items =
       {
         NewSectionLabel("Object"),
