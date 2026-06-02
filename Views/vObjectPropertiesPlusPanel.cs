@@ -367,6 +367,7 @@ internal sealed class vObjectPropertiesPlusPanel : Panel
     _textSection = new StackLayout
     {
       Visible = false,
+      HorizontalContentAlignment = HorizontalAlignment.Stretch,
       Items =
       {
         NewSectionLabel("Text"),
