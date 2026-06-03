@@ -94,6 +94,14 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     Height
   }
 
+  private class CurveInfo
+  {
+    public required Curve Curve { get; init; }
+    public required RhinoObject ParentObject { get; init; }
+    public bool IsSegment { get; init; }
+    public int SegmentIndex { get; init; }
+  }
+
   private readonly RectangleSideHighlightConduit _rectangleSideHighlightConduit = new();
   private RectangleHighlightKind _rectangleHighlightKind = RectangleHighlightKind.None;
   private readonly FocusHighlightConduit _focusHighlightConduit = new();
@@ -101,6 +109,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private RhinoDoc? _doc;
   private readonly List<Guid> _selectedObjectIds = new();
   private List<RhinoObject> _allSelectedObjects = new();
+  private List<CurveInfo> _currentCurveInfos = new();
   private List<RhinoObject?> _typeDropMap = new();
   private List<List<RhinoObject>> _dropdownClusters = new();
   private readonly List<string> _clusterKeyOrder = new();
@@ -572,36 +581,6 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       SetControlEnabled(_textItalicBtn, true);
       SetControlEnabled(_textUnderlineBtn, true);
 
-      // Populate type dropdown: item 0 = summary, then per-object items with separators between groups.
-      var typeItems = new List<string>();
-      _typeDropMap = new List<RhinoObject?>();
-      typeItems.Add(BuildTypeText(_allSelectedObjects));
-      _typeDropMap.Add(null); // index 0 = summary
-      if (_allSelectedObjects.Count > 1)
-      {
-        var dropClusters = _dropdownClusters;
-        bool firstCluster = true;
-        foreach (var cluster in dropClusters)
-        {
-          if (!firstCluster)
-          {
-            typeItems.Add("─────────────");
-            _typeDropMap.Add(null);
-          }
-          firstCluster = false;
-          foreach (var o in cluster)
-          {
-            typeItems.Add(BuildObjectDropLabel(o, doc));
-            _typeDropMap.Add(o);
-          }
-        }
-      }
-      _typeDrop.DataStore = typeItems;
-      int focusedMapIdx = isFocusDrillDown
-        ? _typeDropMap.FindIndex(o => o?.Id == _focusedObjectId)
-        : -1;
-      _typeDrop.SelectedIndex = focusedMapIdx > 0 ? focusedMapIdx : 0;
-
     _nameBox.Text = CommonOrVaries(objectList, o => SafeString(o.Attributes.Name));
     string layerText = CommonOrVaries(objectList, o => LayerName(doc, o.Attributes.LayerIndex));
     _currentLayerFullPath = layerText;
@@ -645,7 +624,59 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     else
       _densityStepper.Value = -1;
 
-    List<Curve> infoCurves = GetInfoCurvesForSelection(objectList, out bool hasSegmentSelection);
+    _currentCurveInfos = GetInfoCurvesForSelection(objectList, out bool hasSegmentSelection);
+    
+    // Populate type dropdown
+    var typeItems = new List<string>();
+    _typeDropMap = new List<RhinoObject?>();
+    
+    // If we have segment selection, show each segment separately
+    if (hasSegmentSelection && _currentCurveInfos.Any(ci => ci.IsSegment))
+    {
+      typeItems.Add(BuildSegmentTypeText(_currentCurveInfos));
+      _typeDropMap.Add(null); // index 0 = summary
+      
+      if (_currentCurveInfos.Count > 1)
+      {
+        foreach (var curveInfo in _currentCurveInfos)
+        {
+          string segmentLabel = BuildCurveInfoLabel(curveInfo, doc);
+          typeItems.Add(segmentLabel);
+          _typeDropMap.Add(curveInfo.ParentObject);
+        }
+      }
+    }
+    else
+    {
+      // Normal object selection (no segments)
+      typeItems.Add(BuildTypeText(_allSelectedObjects));
+      _typeDropMap.Add(null); // index 0 = summary
+      if (_allSelectedObjects.Count > 1)
+      {
+        var dropClusters = _dropdownClusters;
+        bool firstCluster = true;
+        foreach (var cluster in dropClusters)
+        {
+          if (!firstCluster)
+          {
+            typeItems.Add("─────────────");
+            _typeDropMap.Add(null);
+          }
+          firstCluster = false;
+          foreach (var o in cluster)
+          {
+            typeItems.Add(BuildObjectDropLabel(o, doc));
+            _typeDropMap.Add(o);
+          }
+        }
+      }
+    }
+    _typeDrop.DataStore = typeItems;
+    int focusedMapIdx = isFocusDrillDown
+      ? _typeDropMap.FindIndex(o => o?.Id == _focusedObjectId)
+      : -1;
+    _typeDrop.SelectedIndex = focusedMapIdx > 0 ? focusedMapIdx : 0;
+    
     UpdateTextSection(objectList, doc);
 
     int curveCount = 0;
@@ -663,8 +694,9 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     double rectangleAngleToleranceRadians = RhinoMath.ToRadians(2.0);
     Vector3d horizontalReference = GetHorizontalReference(doc);
 
-    foreach (Curve curve in infoCurves)
+    foreach (var curveInfo in _currentCurveInfos)
     {
+      Curve curve = curveInfo.Curve;
       curveCount++;
 
       totalCurveLength += curve.GetLength();
@@ -766,7 +798,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _curveMetricBox.Visible = showCurveMetric;
     _curveMetricUnitDrop.Visible = showCurveMetric;
 
-    bool hasNonCircularCurve = infoCurves.Any(c => !c.TryGetCircle(out _) && !c.TryGetArc(out _));
+    bool hasNonCircularCurve = _currentCurveInfos.Any(ci => !ci.Curve.TryGetCircle(out _) && !ci.Curve.TryGetArc(out _));
     _curveMetricLabel.Text = hasCircle && !hasArc && !hasNonCircularCurve
       ? "Circumference"
       : hasArc && !hasCircle && !hasNonCircularCurve
@@ -775,8 +807,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
           ? "Len/Circum"
           : "Length";
 
-    var curveLengths = infoCurves
-      .Select(c => ConvertLength(c.GetLength(), modelUnits, curveMetricUnits))
+    var curveLengths = _currentCurveInfos
+      .Select(ci => ConvertLength(ci.Curve.GetLength(), modelUnits, curveMetricUnits))
       .ToList();
 
     SetControlEnabled(_curveMetricBox, showCurveMetric && curveLengths.Count > 0);
@@ -1034,6 +1066,39 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       return $"{objects.Count} {Pluralize(firstName, objects.Count)}";
 
     return "varies";
+  }
+
+  private static string BuildSegmentTypeText(IReadOnlyList<CurveInfo> curveInfos)
+  {
+    if (curveInfos.Count == 0)
+      return "-";
+
+    if (curveInfos.Count == 1)
+      return CurveTypeNameWithSegment(curveInfos[0]);
+
+    string firstName = CurveTypeNameWithSegment(curveInfos[0]);
+    bool allSameType = curveInfos.All(ci => CurveTypeNameWithSegment(ci) == firstName);
+    if (allSameType)
+      return $"{curveInfos.Count} {Pluralize(firstName, curveInfos.Count)}";
+
+    return "varies";
+  }
+
+  private static string BuildCurveInfoLabel(CurveInfo curveInfo, RhinoDoc? doc)
+  {
+    string typeName = CurveTypeNameWithSegment(curveInfo);
+    string objectName = SafeString(curveInfo.ParentObject.Attributes.Name);
+    if (!string.IsNullOrEmpty(objectName))
+      return $"{typeName} ({objectName})";
+    return typeName;
+  }
+
+  private static string CurveTypeNameWithSegment(CurveInfo curveInfo)
+  {
+    string baseType = CurveTypeName(curveInfo.Curve);
+    if (curveInfo.IsSegment)
+      return $"{baseType} segment";
+    return baseType;
   }
 
   private static string TypeName(RhinoObject obj)
@@ -1464,10 +1529,10 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     }
   }
 
-  private List<Curve> GetInfoCurvesForSelection(IReadOnlyList<RhinoObject> objects, out bool hasSegmentSelection)
+  private List<CurveInfo> GetInfoCurvesForSelection(IReadOnlyList<RhinoObject> objects, out bool hasSegmentSelection)
   {
     hasSegmentSelection = false;
-    var curves = new List<Curve>();
+    var curveInfos = new List<CurveInfo>();
 
     foreach (var obj in objects)
     {
@@ -1492,7 +1557,13 @@ public sealed class vObjectPropertiesPlusPanel : Panel
             var segment = polyCurve.SegmentCurve(componentIndex.Index);
             if (segment != null)
             {
-              curves.Add(segment);
+              curveInfos.Add(new CurveInfo
+              {
+                Curve = segment,
+                ParentObject = obj,
+                IsSegment = true,
+                SegmentIndex = componentIndex.Index
+              });
               vObjectPropertiesPlusPlugIn.DebugLog($"GetInfoCurvesForSelection: Added PolyCurve segment {componentIndex.Index}, length={segment.GetLength()}");
             }
           }
@@ -1503,7 +1574,13 @@ public sealed class vObjectPropertiesPlusPanel : Panel
             if (pl != null && componentIndex.Index < pl.Count - 1)
             {
               var lineSegment = new Rhino.Geometry.LineCurve(pl[componentIndex.Index], pl[componentIndex.Index + 1]);
-              curves.Add(lineSegment);
+              curveInfos.Add(new CurveInfo
+              {
+                Curve = lineSegment,
+                ParentObject = obj,
+                IsSegment = true,
+                SegmentIndex = componentIndex.Index
+              });
               vObjectPropertiesPlusPlugIn.DebugLog($"GetInfoCurvesForSelection: Added Polyline segment {componentIndex.Index}, length={lineSegment.GetLength()}");
             }
           }
@@ -1511,18 +1588,30 @@ public sealed class vObjectPropertiesPlusPanel : Panel
           {
             // For other curve types or invalid indices, use the whole curve
             vObjectPropertiesPlusPlugIn.DebugLog($"GetInfoCurvesForSelection: Unsupported curve type or invalid index, using whole curve");
-            curves.Add(curve);
+            curveInfos.Add(new CurveInfo
+            {
+              Curve = curve,
+              ParentObject = obj,
+              IsSegment = false,
+              SegmentIndex = -1
+            });
           }
         }
       }
       else
       {
         // No segment selection, use the whole curve
-        curves.Add(curve);
+        curveInfos.Add(new CurveInfo
+        {
+          Curve = curve,
+          ParentObject = obj,
+          IsSegment = false,
+          SegmentIndex = -1
+        });
       }
     }
 
-    return curves;
+    return curveInfos;
   }
 
   private void RefreshFromCurrentSelection()
