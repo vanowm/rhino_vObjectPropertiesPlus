@@ -413,9 +413,9 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       0);
 
     Load += (_, _) => { var d = RhinoDoc.ActiveDoc; if (d != null) RefreshFromDoc(d); };
-    RhinoDoc.SelectObjects      += (_, e) => RefreshFromDoc(e.Document);
-    RhinoDoc.DeselectObjects    += (_, e) => RefreshFromDoc(e.Document);
-    RhinoDoc.DeselectAllObjects += (_, e) => RefreshFromDoc(e.Document);
+    RhinoDoc.SelectObjects      += (_, e) => { vObjectPropertiesPlusPlugIn.DebugLog("Event: SelectObjects"); RefreshFromDoc(e.Document); };
+    RhinoDoc.DeselectObjects    += (_, e) => { vObjectPropertiesPlusPlugIn.DebugLog("Event: DeselectObjects"); RefreshFromDoc(e.Document); };
+    RhinoDoc.DeselectAllObjects += (_, e) => { vObjectPropertiesPlusPlugIn.DebugLog("Event: DeselectAllObjects"); RefreshFromDoc(e.Document); };
     RhinoDoc.ModifyObjectAttributes += (_, e) => { if (e.RhinoObject?.IsSelected(false) == 1) RefreshFromDoc(e.Document); };
 
     SetEmptyState();
@@ -424,20 +424,26 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private void RefreshFromDoc(RhinoDoc doc)
   {
     var selected = doc.Objects.GetSelectedObjects(false, false).ToList();
+    vObjectPropertiesPlusPlugIn.DebugLog($"RefreshFromDoc: GetSelectedObjects returned {selected.Count} objects");
     
     // If no normal selection, check for objects with grips on (potential subobject selection)
     if (selected.Count == 0)
     {
       var allObjects = doc.Objects.GetObjectList(ObjectType.AnyObject);
+      int gripsOnCount = 0;
       foreach (var obj in allObjects)
       {
         if (obj != null && obj.GripsOn)
         {
+          gripsOnCount++;
           selected.Add(obj);
+          vObjectPropertiesPlusPlugIn.DebugLog($"RefreshFromDoc: Found object with GripsOn: {obj.Id}");
         }
       }
+      vObjectPropertiesPlusPlugIn.DebugLog($"RefreshFromDoc: Checked all objects, found {gripsOnCount} with GripsOn");
     }
     
+    vObjectPropertiesPlusPlugIn.DebugLog($"RefreshFromDoc: Final selection count = {selected.Count}");
     Application.Instance.AsyncInvoke(() => UpdateFromSelection(doc, selected));
   }
 
