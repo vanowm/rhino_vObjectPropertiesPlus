@@ -186,11 +186,6 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _radiusBox.Width = InfoNumericValueWidth;
     _diameterBox.Width = InfoNumericValueWidth;
 
-    _nameBox.ReadOnly = false;
-    _curveMetricBox.ReadOnly = false;
-    _radiusBox.ReadOnly = false;
-    _diameterBox.ReadOnly = false;
-
     _nameBox.LostFocus += (_, _) => ApplyName();
     _nameBox.TextChanged += (_, _) => { if (!_isUpdatingUi) _lastUserEditMs = System.Environment.TickCount64; };
     _curveMetricBox.TextChanged += (_, _) => { if (!_isUpdatingUi) _lastUserEditMs = System.Environment.TickCount64; };
@@ -628,9 +623,6 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
     List<Curve> infoCurves = GetInfoCurvesForSelection(objectList, out bool hasSegmentSelection);
     UpdateTextSection(objectList, doc);
-    _curveMetricBox.ReadOnly = hasSegmentSelection;
-    _radiusBox.ReadOnly = hasSegmentSelection;
-    _diameterBox.ReadOnly = hasSegmentSelection;
 
     int curveCount = 0;
     double totalCurveLength = 0.0;
@@ -2980,8 +2972,9 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
   /// <summary>
   /// Centralized method to enable/disable controls with consistent styling.
-  /// TextBox (editable): Use ReadOnly property to toggle edit state while maintaining visual consistency.
+  /// TextBox (editable): Use ReadOnly property to toggle edit state.
   /// TextBox (display-only with transparent background): Keep ReadOnly=true, use Enabled for graying.
+  /// DropDown/NumericStepper: Set Enabled + BackgroundColor to prevent black borders in disabled state.
   /// Other controls: Use Enabled property (framework handles visual state).
   /// </summary>
   private static void SetControlEnabled(Control control, bool enabled)
@@ -3003,6 +2996,16 @@ public sealed class vObjectPropertiesPlusPanel : Panel
         break;
       case TextArea ta:
         ta.ReadOnly = !enabled;
+        break;
+      case DropDown dd:
+        dd.Enabled = enabled;
+        // Fix black border issue in WinForms backend when disabled
+        dd.BackgroundColor = enabled ? SystemColors.WindowBackground : SystemColors.Control;
+        break;
+      case NumericStepper ns:
+        ns.Enabled = enabled;
+        // Fix visual appearance when disabled
+        ns.BackgroundColor = enabled ? SystemColors.WindowBackground : SystemColors.Control;
         break;
       default:
         control.Enabled = enabled;
