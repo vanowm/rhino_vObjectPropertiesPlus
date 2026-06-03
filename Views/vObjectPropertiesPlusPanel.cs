@@ -544,7 +544,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       var modelUnits = _doc.ModelUnitSystem;
       
       var segmentsToMeasure = focusedSegmentIndex >= 0
-        ? segments.Where(s => s.SegmentIndex == focusedSegmentIndex).ToList()
+        ? segments.Where(s => s.SegmentIndex == focusedSegmentIndex && s.ParentObject.Id == _focusedObjectId).ToList()
         : segments;
       
       foreach (var curveInfo in segmentsToMeasure)
@@ -1541,8 +1541,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       _selectedObjectIds.Clear();
       _selectedObjectIds.Add(segment.ParentObject.Id);
       
-      // Highlight the parent object (segments can't be independently highlighted via conduit)
-      _focusHighlightConduit.SetObject(segment.ParentObject);
+      // Highlight only the specific segment curve
+      _focusHighlightConduit.SetSegment(segment.ParentObject, segment.Curve);
       _focusHighlightConduit.Enabled = true;
       _doc.Views.Redraw();
       
@@ -4210,36 +4210,61 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private sealed class FocusHighlightConduit : DisplayConduit
   {
     private RhinoObject? _obj;
+    private Curve? _segmentCurve;
 
-    public void SetObject(RhinoObject obj) => _obj = obj;
-    public void Clear() => _obj = null;
+    public void SetObject(RhinoObject obj) 
+    {
+      _obj = obj;
+      _segmentCurve = null;
+    }
+    
+    public void SetSegment(RhinoObject obj, Curve segmentCurve)
+    {
+      _obj = obj;
+      _segmentCurve = segmentCurve;
+    }
+    
+    public void Clear() 
+    {
+      _obj = null;
+      _segmentCurve = null;
+    }
 
     protected override void DrawOverlay(DrawEventArgs e)
     {
       base.DrawOverlay(e);
+      
+      // If we have a specific segment curve, draw only that
+      if (_segmentCurve != null)
+      {
+        var color = System.Drawing.Color.FromArgb(255, 235, 130, 20);
+        e.Display.DrawCurve(_segmentCurve, color, 3);
+        return;
+      }
+      
       if (_obj?.Geometry == null)
         return;
 
-      var color = System.Drawing.Color.FromArgb(255, 235, 130, 20);
+      var color2 = System.Drawing.Color.FromArgb(255, 235, 130, 20);
       switch (_obj.Geometry)
       {
         case Curve crv:
-          e.Display.DrawCurve(crv, color, 3);
+          e.Display.DrawCurve(crv, color2, 3);
           break;
         case Rhino.Geometry.Brep brep:
-          e.Display.DrawBrepWires(brep, color, 1);
+          e.Display.DrawBrepWires(brep, color2, 1);
           break;
         case Rhino.Geometry.Extrusion ext:
           var extBrep = ext.ToBrep(true);
-          if (extBrep != null) e.Display.DrawBrepWires(extBrep, color, 1);
+          if (extBrep != null) e.Display.DrawBrepWires(extBrep, color2, 1);
           break;
         case Rhino.Geometry.Mesh mesh:
-          e.Display.DrawMeshWires(mesh, color, 2);
+          e.Display.DrawMeshWires(mesh, color2, 2);
           break;
         default:
           var bb = _obj.Geometry.GetBoundingBox(false);
           if (bb.IsValid)
-            e.Display.DrawBox(new Rhino.Geometry.Box(bb), color, 2);
+            e.Display.DrawBox(new Rhino.Geometry.Box(bb), color2, 2);
           break;
       }
     }
