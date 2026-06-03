@@ -2959,10 +2959,11 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
   private static void SetEditableTextValue(TextBox textBox, string value)
   {
-    if (value == VariesText)
+    if (value == VariesText || value == "-")
     {
+      // Use PlaceholderText for special values to avoid polluting undo history
       textBox.Text = string.Empty;
-      textBox.PlaceholderText = VariesText;
+      textBox.PlaceholderText = value;
       return;
     }
 
@@ -2972,9 +2973,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
   /// <summary>
   /// Centralized method to enable/disable controls with consistent styling.
-  /// Display-only TextBoxes (transparent background): Always ReadOnly, Enabled controls visual state only.
-  /// Editable TextBoxes: Both ReadOnly and Enabled set together for consistent disabled appearance.
-  /// DropDown/NumericStepper: Set Enabled + BackgroundColor to prevent black borders.
+  /// TextBox: Use ReadOnly to control editability. For editable boxes, also manage BackgroundColor
+  /// to ensure consistent disabled appearance (transparent when disabled like display-only boxes).
   /// Other controls: Use Enabled property only.
   /// </summary>
   private static void SetControlEnabled(Control control, bool enabled)
@@ -2982,31 +2982,26 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     switch (control)
     {
       case TextBox tb:
-        if (tb.BackgroundColor == Colors.Transparent)
+        // Check if this is a display-only box (always has transparent background)
+        bool isDisplayOnly = tb.TabIndex == -1; // Display-only boxes have TabIndex=-1
+        
+        if (isDisplayOnly)
         {
-          // Display-only box: keep ReadOnly=true always, just control visual state via Enabled
+          // Display-only: keep ReadOnly=true always, just set Enabled
           tb.Enabled = enabled;
         }
         else
         {
-          // Editable box: set BOTH for consistent visual state
+          // Editable: control ReadOnly state and match background to display-only when disabled
           tb.ReadOnly = !enabled;
           tb.Enabled = enabled;
+          // Make disabled editable boxes look like display-only boxes (transparent)
+          tb.BackgroundColor = enabled ? SystemColors.WindowBackground : Colors.Transparent;
         }
         break;
       case TextArea ta:
         ta.ReadOnly = !enabled;
         ta.Enabled = enabled;
-        break;
-      case DropDown dd:
-        dd.Enabled = enabled;
-        // Fix black border issue in WinForms backend when disabled
-        dd.BackgroundColor = enabled ? SystemColors.WindowBackground : SystemColors.Control;
-        break;
-      case NumericStepper ns:
-        ns.Enabled = enabled;
-        // Fix visual appearance when disabled
-        ns.BackgroundColor = enabled ? SystemColors.WindowBackground : SystemColors.Control;
         break;
       default:
         control.Enabled = enabled;
