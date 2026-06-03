@@ -1448,7 +1448,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     }
   }
 
-  private static List<Curve> GetInfoCurvesForSelection(IReadOnlyList<RhinoObject> objects, out bool hasSegmentSelection)
+  private List<Curve> GetInfoCurvesForSelection(IReadOnlyList<RhinoObject> objects, out bool hasSegmentSelection)
   {
     hasSegmentSelection = false;
     var curves = new List<Curve>();
@@ -1460,6 +1460,10 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
       curves.Add(curve);
     }
+
+    // For now, segment selection detection is disabled
+    // TODO: Implement proper sub-object selection detection using Rhino's selection APIs
+    // This would require tracking ComponentIndex information from the selection events
 
     return curves;
   }
@@ -2976,8 +2980,10 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
   /// <summary>
   /// Centralized method to enable/disable controls with consistent styling.
-  /// All controls: Sets Enabled property (framework handles visual appearance).
-  /// TextBox (display-only with transparent background): Always stays ReadOnly=true.
+  /// TextBox (editable): Use ReadOnly only - keeps proper visual state.
+  /// TextBox (display-only with transparent background): Keep ReadOnly=true, set Enabled for graying.
+  /// DropDown/NumericStepper: Set Enabled + BackgroundColor to prevent black borders.
+  /// Other controls: Set Enabled only.
   /// </summary>
   private static void SetControlEnabled(Control control, bool enabled)
   {
@@ -2992,14 +2998,26 @@ public sealed class vObjectPropertiesPlusPanel : Panel
         }
         else
         {
-          // Editable boxes: use ReadOnly for functional state, Enabled for visual state
+          // Editable boxes: ONLY use ReadOnly property (don't touch Enabled)
           tb.ReadOnly = !enabled;
-          tb.Enabled = enabled;
         }
         break;
       case TextArea ta:
         ta.ReadOnly = !enabled;
-        ta.Enabled = enabled;
+        break;
+      case DropDown dd:
+        dd.Enabled = enabled;
+        if (enabled)
+          dd.BackgroundColor = SystemColors.WindowBackground;
+        else
+          dd.BackgroundColor = SystemColors.Control;
+        break;
+      case NumericStepper ns:
+        ns.Enabled = enabled;
+        if (enabled)
+          ns.BackgroundColor = SystemColors.WindowBackground;
+        else
+          ns.BackgroundColor = SystemColors.Control;
         break;
       default:
         control.Enabled = enabled;
