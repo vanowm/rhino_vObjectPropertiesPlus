@@ -24,6 +24,8 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
   };
 
   private TabControl? _propertiesTabControl;
+  private RhinoDoc? _pendingCloseDoc;
+  private bool _closeCheckScheduled;
 
   public vObjectPropertiesPlusLauncherPage()
   {
@@ -40,11 +42,17 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
 
   public override bool ShouldDisplay(ObjectPropertiesPageEventArgs e) => true;
 
+  public override void OnCreateParent(IntPtr hwndParent)
+  {
+    base.OnCreateParent(hwndParent);
+    EnsureTabControlHooked(hwndParent);
+  }
+
   public override bool OnActivate(bool active)
   {
     if (active)
     {
-      EnsureTabControlHooked();
+      EnsureTabControlHooked(IntPtr.Zero);
       ShowPanel();
     }
     return base.OnActivate(active);
@@ -53,18 +61,18 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
   private void OnControlLoadComplete(object? sender, EventArgs e)
   {
     _control.LoadComplete -= OnControlLoadComplete;
-    EnsureTabControlHooked();
+    EnsureTabControlHooked(IntPtr.Zero);
   }
 
   // Resolve the Properties TabControl once the page is actually parented.
   // LoadComplete is sometimes too early, so we also retry from OnActivate.
-  private void EnsureTabControlHooked()
+  private void EnsureTabControlHooked(IntPtr hwndParent)
   {
     if (_propertiesTabControl != null) return;
 
     try
     {
-      var native = GetNativeControl(_control);
+      var native = GetNativeControl(hwndParent) ?? GetNativeControl(_control);
       if (native == null)
       {
         vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: native control not available for tab hook.");
@@ -86,6 +94,13 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
     {
       vObjectPropertiesPlusPlugIn.DebugLog($"LauncherPage: failed to hook TabControl: {ex.Message}");
     }
+  }
+
+  private static System.Windows.Forms.Control? GetNativeControl(IntPtr hwndParent)
+  {
+    if (hwndParent == IntPtr.Zero) return null;
+    try { return System.Windows.Forms.Control.FromHandle(hwndParent); }
+    catch { return null; }
   }
 
   private static System.Windows.Forms.Control? GetNativeControl(Eto.Forms.Control control)
@@ -184,10 +199,26 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
   }
 
   private void OnDeselectAll(object? sender, RhinoDeselectAllObjectsEventArgs e)
-    => CloseIfNothingSelected(e.Document);
+    => ScheduleCloseIfNothingSelected(e.Document);
 
   private void OnDeselect(object? sender, RhinoObjectSelectionEventArgs e)
-    => CloseIfNothingSelected(e.Document);
+    => ScheduleCloseIfNothingSelected(e.Document);
+
+  private void ScheduleCloseIfNothingSelected(RhinoDoc? doc)
+  {
+    _pendingCloseDoc = doc;
+    if (_closeCheckScheduled) return;
+    _closeCheckScheduled = true;
+    RhinoApp.Idle += OnIdleCloseIfNothingSelected;
+  }
+
+  private void OnIdleCloseIfNothingSelected(object? sender, EventArgs e)
+  {
+    RhinoApp.Idle -= OnIdleCloseIfNothingSelected;
+    _closeCheckScheduled = false;
+    CloseIfNothingSelected(_pendingCloseDoc);
+    _pendingCloseDoc = null;
+  }
 
   private static void CloseIfNothingSelected(RhinoDoc? doc)
   {
