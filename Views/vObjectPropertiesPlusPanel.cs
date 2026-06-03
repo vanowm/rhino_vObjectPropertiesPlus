@@ -2976,8 +2976,9 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
   /// <summary>
   /// Centralized method to enable/disable controls with consistent styling.
-  /// For TextBox/TextArea: uses ReadOnly property to prevent editing while keeping visual appearance.
-  /// For all other controls: uses Enabled property (OS handles visual disabled state automatically).
+  /// TextBox/TextArea: Uses ReadOnly to prevent editing while maintaining appearance.
+  /// DropDown: Sets Enabled + BackgroundColor to show disabled state (Eto.Forms default shows black border).
+  /// Other controls: Sets Enabled only.
   /// </summary>
   private static void SetControlEnabled(Control control, bool enabled)
   {
@@ -2988,6 +2989,30 @@ public sealed class vObjectPropertiesPlusPanel : Panel
         break;
       case TextArea ta:
         ta.ReadOnly = !enabled;
+        break;
+      case DropDown dd:
+        dd.Enabled = enabled;
+        if (enabled)
+        {
+          // Reset to default background when enabled
+          dd.BackgroundColor = SystemColors.WindowBackground;
+        }
+        else
+        {
+          // Light gray background to show disabled state without black border
+          dd.BackgroundColor = SystemColors.Control;
+        }
+        break;
+      case NumericStepper ns:
+        ns.Enabled = enabled;
+        if (enabled)
+        {
+          ns.BackgroundColor = SystemColors.WindowBackground;
+        }
+        else
+        {
+          ns.BackgroundColor = SystemColors.Control;
+        }
         break;
       default:
         control.Enabled = enabled;

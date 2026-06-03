@@ -1,6 +1,6 @@
 // vObjectProperties+ Win32 Resource File
 // Icon resource for Plugin Manager display
 
-#define IDI_ICON1 101
+#define IDI_MAINICON 1
 
-IDI_ICON1 ICON "vObjectPropertiesPlus.ico"
+IDI_MAINICON ICON "vObjectPropertiesPlus.ico"
