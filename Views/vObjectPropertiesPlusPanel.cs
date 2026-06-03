@@ -547,12 +547,17 @@ public sealed class vObjectPropertiesPlusPanel : Panel
         ? segments.Where(s => s.SegmentIndex == focusedSegmentIndex && s.ParentObject.Id == _focusedObjectId).ToList()
         : segments;
       
+      vObjectPropertiesPlusPlugIn.DebugLog($"RefreshForSegmentSelection: focusedSegmentIndex={focusedSegmentIndex}, _focusedObjectId={_focusedObjectId}");
+      vObjectPropertiesPlusPlugIn.DebugLog($"RefreshForSegmentSelection: segments.Count={segments.Count}, segmentsToMeasure.Count={segmentsToMeasure.Count}");
+      
       foreach (var curveInfo in segmentsToMeasure)
       {
         var curve = curveInfo.Curve;
         if (curve != null)
         {
-          totalLength += curve.GetLength();
+          double len = curve.GetLength();
+          totalLength += len;
+          vObjectPropertiesPlusPlugIn.DebugLog($"RefreshForSegmentSelection: segment index={curveInfo.SegmentIndex}, parentId={curveInfo.ParentObject.Id}, length={len}");
           
           if (curve is ArcCurve arc)
           {
@@ -565,12 +570,16 @@ public sealed class vObjectPropertiesPlusPanel : Panel
         }
       }
       
+      vObjectPropertiesPlusPlugIn.DebugLog($"RefreshForSegmentSelection: totalLength={totalLength}");
+      
       // Get current unit systems from dropdowns
       UnitSystem totalLengthUnits = GetSelectedUnitSystem(_totalLengthUnitDrop, _doc);
       UnitSystem radiusUnits = GetSelectedUnitSystem(_radiusUnitDrop, _doc);
       
       // Update curve fields
       _totalLengthBox.Text = FormatInfoNumber(ConvertLength(totalLength, modelUnits, totalLengthUnits), _totalLengthUnitDrop);
+      
+      vObjectPropertiesPlusPlugIn.DebugLog($"RefreshForSegmentSelection: _totalLengthBox.Text={_totalLengthBox.Text}");
       
       if (radii.Count > 0)
       {
