@@ -46,9 +46,6 @@ public class vObjectPropertiesPlusPlugIn : PlugIn
     {
       Panels.RegisterPanel(this, typeof(Views.vObjectPropertiesPlusPanel), "Object+", LoadPanelIcon());
       DebugLog("OnLoad: RegisterPanel succeeded.");
-      
-      // Open panel on first idle to make it visible and show up in Windows menu
-      RhinoApp.Idle += OnFirstIdle;
     }
     catch (Exception ex)
     {
@@ -56,22 +53,6 @@ public class vObjectPropertiesPlusPlugIn : PlugIn
     }
 
     return LoadReturnCode.Success;
-  }
-
-  private static void OnFirstIdle(object? sender, EventArgs e)
-  {
-    RhinoApp.Idle -= OnFirstIdle;
-    var panelGuid = typeof(Views.vObjectPropertiesPlusPanel).GUID;
-    DebugLog($"OnFirstIdle: opening panel GUID={panelGuid}");
-    try
-    {
-      Panels.OpenPanel(panelGuid);
-      DebugLog("OnFirstIdle: OpenPanel succeeded.");
-    }
-    catch (Exception ex)
-    {
-      DebugLog($"OnFirstIdle: OpenPanel FAILED: {ex}");
-    }
   }
 
   internal static System.Drawing.Icon LoadPanelIcon()
