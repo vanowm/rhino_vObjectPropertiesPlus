@@ -115,6 +115,7 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
     int currentPid = Process.GetCurrentProcess().Id;
     int topWindowsScanned = 0;
     int childWindowsScanned = 0;
+    int tabControlsFound = 0;
     
     EnumWindows((topHandle, _) =>
     {
@@ -124,17 +125,29 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
       if (windowPid != currentPid)
         return true;
 
-      if (IsTabControlWindow(topHandle) && TabContainsTitle(topHandle, "Object+"))
+      if (IsTabControlWindow(topHandle))
       {
-        found = topHandle;
-        vObjectPropertiesPlusPlugIn.DebugLog($"LauncherPage: tab handle found in top window (scanned {topWindowsScanned} top-level, {childWindowsScanned} child).");
-        return false;
+        tabControlsFound++;
+        var allTabs = GetAllTabTitles(topHandle);
+        vObjectPropertiesPlusPlugIn.DebugLog($"LauncherPage: found top-level SysTabControl32 #{tabControlsFound} with tabs: [{string.Join(", ", allTabs)}]");
+        
+        if (TabContainsTitle(topHandle, "Object+"))
+        {
+          found = topHandle;
+          vObjectPropertiesPlusPlugIn.DebugLog($"LauncherPage: tab handle found in top window (scanned {topWindowsScanned} top-level, {childWindowsScanned} child).");
+          return false;
+        }
       }
 
       EnumChildWindows(topHandle, (childHandle, _) =>
       {
         childWindowsScanned++;
         if (!IsTabControlWindow(childHandle)) return true;
+        
+        tabControlsFound++;
+        var allTabs = GetAllTabTitles(childHandle);
+        vObjectPropertiesPlusPlugIn.DebugLog($"LauncherPage: found child SysTabControl32 #{tabControlsFound} with tabs: [{string.Join(", ", allTabs)}]");
+        
         if (!TabContainsTitle(childHandle, "Object+")) return true;
         found = childHandle;
         vObjectPropertiesPlusPlugIn.DebugLog($"LauncherPage: tab handle found in child window (scanned {topWindowsScanned} top-level, {childWindowsScanned} child).");
@@ -145,7 +158,7 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
     }, IntPtr.Zero);
 
     if (found == IntPtr.Zero)
-      vObjectPropertiesPlusPlugIn.DebugLog($"LauncherPage: no Properties tab found (scanned {topWindowsScanned} top-level, {childWindowsScanned} child windows).");
+      vObjectPropertiesPlusPlugIn.DebugLog($"LauncherPage: no Properties tab found (scanned {topWindowsScanned} top-level, {childWindowsScanned} child windows, found {tabControlsFound} SysTabControl32 controls).");
 
     return found;
   }
