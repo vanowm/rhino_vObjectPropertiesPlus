@@ -2986,6 +2986,18 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     {
       case TextBox tb:
         tb.ReadOnly = !enabled;
+        if (enabled)
+        {
+          // Only reset background if it's not transparent (info display boxes)
+          if (tb.BackgroundColor != Colors.Transparent)
+            tb.BackgroundColor = SystemColors.WindowBackground;
+        }
+        else
+        {
+          // Gray background for disabled editable boxes (skip transparent info displays)
+          if (tb.BackgroundColor != Colors.Transparent)
+            tb.BackgroundColor = SystemColors.Control;
+        }
         break;
       case TextArea ta:
         ta.ReadOnly = !enabled;
