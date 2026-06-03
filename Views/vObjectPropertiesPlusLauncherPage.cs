@@ -21,6 +21,7 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
   private bool _isObjectPlusTabActive;
   private RhinoDoc? _pendingCloseDoc;
   private bool _closeCheckScheduled;
+  private DateTime _lastSelectionChangeTime = DateTime.MinValue;
 
   public vObjectPropertiesPlusLauncherPage()
   {
@@ -49,8 +50,22 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
     }
     else
     {
-      vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: OnActivate(false) - user left Object+ tab (panel stays visible if objects selected).");
-      // Don't auto-hide when leaving Object+ tab; let selection events control visibility
+      // If deactivation happens shortly after a selection change, it's likely Rhino auto-switching tabs
+      // (e.g., selecting text causes Rhino to switch to Text tab). Keep O+ visible in that case.
+      var timeSinceSelection = DateTime.Now - _lastSelectionChangeTime;
+      bool isAutoSwitch = timeSinceSelection.TotalMilliseconds < 500;
+      
+      vObjectPropertiesPlusPlugIn.DebugLog($"LauncherPage: OnActivate(false) - time since last selection: {timeSinceSelection.TotalMilliseconds:F0}ms, auto-switch={isAutoSwitch}");
+      
+      if (isAutoSwitch)
+      {
+        vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: keeping O+ visible (likely auto-tab-switch from selection change).");
+      }
+      else
+      {
+        vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: hiding O+ (user manually clicked another tab).");
+        HidePanel();
+      }
     }
     
     return base.OnActivate(active);
@@ -120,6 +135,7 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
 
   private void OnSelect(object? sender, RhinoObjectSelectionEventArgs e)
   {
+    _lastSelectionChangeTime = DateTime.Now;
     vObjectPropertiesPlusPlugIn.DebugLog($"LauncherPage: OnSelect event. Object+ tab active={_isObjectPlusTabActive}");
     CancelScheduledClose();
     
