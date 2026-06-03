@@ -510,6 +510,36 @@ public sealed class vObjectPropertiesPlusPanel : Panel
         return;
       }
 
+      // Re-enable all controls that were disabled in SetEmptyState
+      _typeDrop.Enabled = true;
+      _nameBox.Enabled = true;
+      _layerDrop.Enabled = true;
+      _displayColorDrop.Enabled = true;
+      _displayModeDrop.Enabled = true;
+      _linetypeDrop.Enabled = true;
+      _printColorDrop.Enabled = true;
+      _printWidthDrop.Enabled = true;
+      _sectionStyleDrop.Enabled = true;
+      _hyperlinkButton.Enabled = true;
+      _totalLengthBox.Enabled = true;
+      _curveMetricUnitDrop.Enabled = true;
+      _totalLengthUnitDrop.Enabled = true;
+      _infoFormatDrop.Enabled = true;
+      _infoPrecisionDrop.Enabled = true;
+      _textFontDrop.Enabled = true;
+      _textHeightUnitDrop.Enabled = true;
+      _textContentArea.Enabled = true;
+      _textAlignLeftBtn.Enabled = true;
+      _textAlignCenterBtn.Enabled = true;
+      _textAlignRightBtn.Enabled = true;
+      _textAlignAutoBtn.Enabled = true;
+      _textVAlignTopBtn.Enabled = true;
+      _textVAlignMiddleBtn.Enabled = true;
+      _textVAlignBottomBtn.Enabled = true;
+      _textBoldBtn.Enabled = true;
+      _textItalicBtn.Enabled = true;
+      _textUnderlineBtn.Enabled = true;
+
       // Populate type dropdown: item 0 = summary, then per-object items with separators between groups.
       var typeItems = new List<string>();
       _typeDropMap = new List<RhinoObject?>();
@@ -845,21 +875,31 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   {
     _typeDrop.DataStore = new[] { "No selection" };
     _typeDrop.SelectedIndex = 0;
+    _typeDrop.Enabled = false;
     _allSelectedObjects.Clear();
     _focusedObjectId = Guid.Empty;
     _selectedObjectIds.Clear();
     _nameBox.Text = "";
+    _nameBox.Enabled = false;
     _currentLayerFullPath = "-";
     SetLayerDropValue(_layerDrop, null, "-", _layerExpandedState);
+    _layerDrop.Enabled = false;
     SetDropValue(_displayColorDrop, "-", "By Layer", "By Parent", "By Material", "Custom...");
+    _displayColorDrop.Enabled = false;
     SetDisplayModeDropValue(_displayModeDrop, _doc, "-");
+    _displayModeDrop.Enabled = false;
     SetLinetypeDropValue(_linetypeDrop, _doc, "-");
+    _linetypeDrop.Enabled = false;
     _linetypeScaleStepper.Value = 1;
     _linetypeScaleStepper.Enabled = false;
     SetDropValue(_printColorDrop, "-", "By Display", "By Layer", "By Parent", "Custom...");
+    _printColorDrop.Enabled = false;
     SetPrintWidthDropValue(_printWidthDrop, "-");
+    _printWidthDrop.Enabled = false;
     SetDropValue(_sectionStyleDrop, "-", "By Layer", "By Parent", "By Clipping Plane", "Custom...");
+    _sectionStyleDrop.Enabled = false;
     _hyperlinkLabel.Text = "";
+    _hyperlinkButton.Enabled = false;
     _displayColorButton.Enabled = false;
     SetButtonIcon(_displayColorButton, "Layer");
     _printColorButton.Enabled = false;
@@ -869,18 +909,25 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _customMeshCheck.Enabled = false;
     _customMeshAdjustButton.Enabled = false;
     SetCheckState(_castsShadowsCheck, null);
+    _castsShadowsCheck.Enabled = false;
     SetCheckState(_receivesShadowsCheck, null);
+    _receivesShadowsCheck.Enabled = false;
     _densityStepper.Value = -1;
     _densityStepper.Enabled = false;
     SetCheckState(_showIsocurveCheck, null);
     _showIsocurveCheck.Enabled = false;
 
     _totalLengthBox.Text = "-";
+    _totalLengthBox.Enabled = false;
     _totalLengthNameLabel.Text = "Total length";
     _curveMetricLabel.Text = "Length";
     _curveMetricLabel.Visible = true;
     _curveMetricBox.Visible = true;
     _curveMetricUnitDrop.Visible = true;
+    _curveMetricUnitDrop.Enabled = false;
+    _totalLengthUnitDrop.Enabled = false;
+    _infoFormatDrop.Enabled = false;
+    _infoPrecisionDrop.Enabled = false;
     _curveMetricBox.ReadOnly = false;
     _radiusNameLabel.Text = "Radius";
     _diameterNameLabel.Text = "Diameter";
@@ -905,19 +952,33 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _infoPlusSection.Visible = true;
     _textSection.Visible = false;
     _textFontDrop.SelectedIndex = -1;
+    _textFontDrop.Enabled = false;
+    _textHeightStepper.Enabled = false;
+    _textHeightUnitDrop.Enabled = false;
     _textContentArea.Text = "";
+    _textContentArea.Enabled = false;
     _textContentArea.Font = new Eto.Drawing.Font(SystemFont.Default, 9f);
     _textContentArea.TextAlignment = TextAlignment.Left;
     _textAlignLeftBtn.Checked = false;
+    _textAlignLeftBtn.Enabled = false;
     _textAlignCenterBtn.Checked = false;
+    _textAlignCenterBtn.Enabled = false;
     _textAlignRightBtn.Checked = false;
+    _textAlignRightBtn.Enabled = false;
     _textAlignAutoBtn.Checked = false;
+    _textAlignAutoBtn.Enabled = false;
     _textVAlignTopBtn.Checked = false;
+    _textVAlignTopBtn.Enabled = false;
     _textVAlignMiddleBtn.Checked = false;
+    _textVAlignMiddleBtn.Enabled = false;
     _textVAlignBottomBtn.Checked = false;
+    _textVAlignBottomBtn.Enabled = false;
     _textBoldBtn.Checked = false;
+    _textBoldBtn.Enabled = false;
     _textItalicBtn.Checked = false;
+    _textItalicBtn.Enabled = false;
     _textUnderlineBtn.Checked = false;
+    _textUnderlineBtn.Enabled = false;
   }
 
   private void EnsureSegmentReadOnlyInfoBoxesAreSelectable(bool hasSegmentSelection)

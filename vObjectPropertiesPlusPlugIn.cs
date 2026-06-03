@@ -14,6 +14,7 @@ public class vObjectPropertiesPlusPlugIn : PlugIn
   private static readonly object LogLock = new();
   private static bool _isFirstLog = true;
   private static System.Drawing.Icon? _cachedPanelIcon;
+  private static System.Drawing.Bitmap? _iconBitmap; // Keep bitmap alive for icon handle
 
   public override PlugInLoadTime LoadTime => PlugInLoadTime.AtStartup;
   protected override string LocalPlugInName => "vObjectProperties+";
@@ -45,6 +46,9 @@ public class vObjectPropertiesPlusPlugIn : PlugIn
     {
       Panels.RegisterPanel(this, typeof(Views.vObjectPropertiesPlusPanel), "Object+", LoadPanelIcon());
       DebugLog("OnLoad: RegisterPanel succeeded.");
+      
+      // Open panel on first idle to make it visible and show up in Windows menu
+      RhinoApp.Idle += OnFirstIdle;
     }
     catch (Exception ex)
     {
@@ -52,6 +56,22 @@ public class vObjectPropertiesPlusPlugIn : PlugIn
     }
 
     return LoadReturnCode.Success;
+  }
+
+  private static void OnFirstIdle(object? sender, EventArgs e)
+  {
+    RhinoApp.Idle -= OnFirstIdle;
+    var panelGuid = typeof(Views.vObjectPropertiesPlusPanel).GUID;
+    DebugLog($"OnFirstIdle: opening panel GUID={panelGuid}");
+    try
+    {
+      Panels.OpenPanel(panelGuid);
+      DebugLog("OnFirstIdle: OpenPanel succeeded.");
+    }
+    catch (Exception ex)
+    {
+      DebugLog($"OnFirstIdle: OpenPanel FAILED: {ex}");
+    }
   }
 
   internal static System.Drawing.Icon LoadPanelIcon()
@@ -67,12 +87,24 @@ public class vObjectPropertiesPlusPlugIn : PlugIn
       
       if (File.Exists(pngPath))
       {
-        // Keep bitmap alive in memory - create persistent icon
-        var bmp = new System.Drawing.Bitmap(pngPath);
-        DebugLog($"LoadPanelIcon: loaded bitmap {bmp.Width}x{bmp.Height}");
-        _cachedPanelIcon = System.Drawing.Icon.FromHandle(bmp.GetHicon());
-        DebugLog("LoadPanelIcon: created icon from bitmap");
-        return _cachedPanelIcon;
+        using (var sourceBmp = new System.Drawing.Bitmap(pngPath))
+        {
+          DebugLog($"LoadPanelIcon: loaded bitmap {sourceBmp.Width}x{sourceBmp.Height}");
+          
+          // Resize to 24x24 for better display in containers/tabs
+          // Keep bitmap alive to prevent icon handle invalidation
+          _iconBitmap = new System.Drawing.Bitmap(24, 24);
+          using (var g = System.Drawing.Graphics.FromImage(_iconBitmap))
+          {
+            g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+            g.DrawImage(sourceBmp, 0, 0, 24, 24);
+          }
+          
+          DebugLog($"LoadPanelIcon: resized to {_iconBitmap.Width}x{_iconBitmap.Height}");
+          _cachedPanelIcon = System.Drawing.Icon.FromHandle(_iconBitmap.GetHicon());
+          DebugLog("LoadPanelIcon: created icon from resized bitmap");
+          return _cachedPanelIcon;
+        }
       }
       
       DebugLog("LoadPanelIcon: PNG file not found, using system icon");
