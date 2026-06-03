@@ -20,6 +20,7 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
 
   private RhinoDoc? _pendingCloseDoc;
   private bool _closeCheckScheduled;
+  private DateTime _lastSelectionTime = DateTime.MinValue;
 
   public vObjectPropertiesPlusLauncherPage()
   {
@@ -46,7 +47,21 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
     }
     else
     {
-      vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: OnActivate(false) - Object+ tab deactivated (panel visibility controlled by selection only).");
+      // Distinguish between manual tab clicks and Rhino auto-switching tabs
+      var timeSinceSelection = DateTime.Now - _lastSelectionTime;
+      bool isLikelyAutoSwitch = timeSinceSelection.TotalMilliseconds < 500;
+      
+      vObjectPropertiesPlusPlugIn.DebugLog($"LauncherPage: OnActivate(false) - {timeSinceSelection.TotalMilliseconds:F0}ms since selection, likely auto-switch={isLikelyAutoSwitch}");
+      
+      if (!isLikelyAutoSwitch)
+      {
+        vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: hiding O+ (manual tab click to unsupported tab).");
+        HidePanel();
+      }
+      else
+      {
+        vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: keeping O+ visible (Rhino auto-switched tab after selection).");
+      }
     }
     
     return base.OnActivate(active);
@@ -116,17 +131,16 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
 
   private void OnSelect(object? sender, RhinoObjectSelectionEventArgs e)
   {
-    vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: OnSelect event.");
+    _lastSelectionTime = DateTime.Now;
+    vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: OnSelect event - recording selection time and opening panel.");
     CancelScheduledClose();
-    
-    // Always open O+ panel when objects are selected
-    vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: opening panel (objects selected).");
     OpenIfSelected();
   }
 
   private void OnDeselectAll(object? sender, RhinoDeselectAllObjectsEventArgs e)
   {
     vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: OnDeselectAll event.");
+    _lastSelectionTime = DateTime.MinValue; // Reset so next tab switch will hide O+
     ScheduleCloseIfNothingSelected(e.Document);
   }
 
