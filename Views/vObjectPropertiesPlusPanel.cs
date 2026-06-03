@@ -508,56 +508,20 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       }
       _typeDrop.SelectedIndex = focusedMapIdx > 0 ? focusedMapIdx : 0;
       
-      // Disable object-level attributes for segments
-      SetControlEnabled(_nameBox, false);
-      SetControlEnabled(_layerDrop, false);
-      SetControlEnabled(_displayColorDrop, false);
-      SetControlEnabled(_displayColorButton, false);
-      SetControlEnabled(_displayModeDrop, false);
-      SetControlEnabled(_linetypeDrop, false);
-      SetControlEnabled(_linetypeScaleStepper, false);
-      SetControlEnabled(_printColorDrop, false);
-      SetControlEnabled(_printColorButton, false);
-      SetControlEnabled(_printWidthDrop, false);
-      SetControlEnabled(_sectionStyleDrop, false);
-      SetControlEnabled(_hyperlinkButton, false);
-      SetControlEnabled(_customMeshCheck, false);
-      SetControlEnabled(_customMeshAdjustButton, false);
-      SetControlEnabled(_castsShadowsCheck, false);
-      SetControlEnabled(_receivesShadowsCheck, false);
-      SetControlEnabled(_densityStepper, false);
-      SetControlEnabled(_showIsocurveCheck, false);
+      // Get parent object to show its attributes
+      var parentObject = segments[0].ParentObject;
       
-      // Hide non-curve fields
-      _polygonSidesLabel.Visible = false;
-      _polygonSidesStepper.Visible = false;
-      _infoPlusSection.Visible = true;
-      _textSection.Visible = false;
-      DisableRectangleSideHighlight();
+      // First, populate panel with parent object's attributes
+      // This will show object-level fields (name, layer, color, etc.)
+      _isUpdatingUi = false; // Temporarily allow UpdateFromSelection to run
+      UpdateFromSelection(_doc, new[] { parentObject });
+      _isUpdatingUi = true; // Re-enable update guard
       
-      // Enable curve-specific controls
-      _totalLengthNameLabel.Text = "Total length";
-      _curveMetricLabel.Text = "Length";
-      _radiusNameLabel.Text = "Radius";
-      _diameterNameLabel.Text = "Diameter";
-      _curveMetricLabel.Visible = true;
-      _curveMetricBox.Visible = true;
-      _curveMetricUnitDrop.Visible = true;
-      _radiusNameLabel.Visible = true;
-      _radiusBox.Visible = true;
-      _radiusUnitDrop.Visible = true;
-      _diameterNameLabel.Visible = true;
-      _diameterBox.Visible = true;
-      _diameterUnitDrop.Visible = true;
-      SetControlEnabled(_totalLengthBox, true);
-      SetControlEnabled(_curveMetricBox, true);
-      SetControlEnabled(_curveMetricUnitDrop, true);
-      SetControlEnabled(_radiusBox, true);
-      SetControlEnabled(_diameterBox, true);
-      SetControlEnabled(_totalLengthUnitDrop, true);
-      SetControlEnabled(_radiusUnitDrop, true);
-      SetControlEnabled(_diameterUnitDrop, true);
-      SetControlEnabled(_infoFormatDrop, true);
+      // Now override type dropdown with segment list
+      _typeDrop.DataStore = typeItems;
+      _typeDrop.SelectedIndex = focusedMapIdx > 0 ? focusedMapIdx : 0;
+      
+      // Now override geometry metrics with segment-specific values
       SetControlEnabled(_infoPrecisionDrop, true);
       
       // Compute curve metrics for the segment(s)
@@ -601,14 +565,22 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       UnitSystem curveMetricUnits = GetSelectedUnitSystem(_curveMetricUnitDrop, _doc);
       UnitSystem radiusUnits = GetSelectedUnitSystem(_radiusUnitDrop, _doc);
       
-      // Update curve fields
+      // Update curve fields with segment-specific values
       _totalLengthBox.Text = FormatInfoNumber(ConvertLength(totalLength, modelUnits, totalLengthUnits), _totalLengthUnitDrop);
       SetEditableTextValue(_curveMetricBox, FormatInfoNumber(ConvertLength(totalLength, modelUnits, curveMetricUnits), _curveMetricUnitDrop));
       
       vObjectPropertiesPlusPlugIn.DebugLog($"RefreshForSegmentSelection: _totalLengthBox.Text={_totalLengthBox.Text}, _curveMetricBox.Text={_curveMetricBox.Text}");
       
+      // Show radius/diameter only for arc/circle segments
       if (radii.Count > 0)
       {
+        _radiusNameLabel.Visible = true;
+        _radiusBox.Visible = true;
+        _radiusUnitDrop.Visible = true;
+        _diameterNameLabel.Visible = true;
+        _diameterBox.Visible = true;
+        _diameterUnitDrop.Visible = true;
+        
         double avgRadius = radii.Average();
         bool allSame = radii.All(r => Math.Abs(r - avgRadius) < 0.0001);
         double displayRadius = ConvertLength(avgRadius, modelUnits, radiusUnits);
@@ -617,8 +589,13 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       }
       else
       {
-        SetEditableTextValue(_radiusBox, "-");
-        SetEditableTextValue(_diameterBox, "-");
+        // Hide radius/diameter for non-circular segments (line segments, etc.)
+        _radiusNameLabel.Visible = false;
+        _radiusBox.Visible = false;
+        _radiusUnitDrop.Visible = false;
+        _diameterNameLabel.Visible = false;
+        _diameterBox.Visible = false;
+        _diameterUnitDrop.Visible = false;
       }
     }
     finally
