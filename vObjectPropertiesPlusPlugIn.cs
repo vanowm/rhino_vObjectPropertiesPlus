@@ -50,35 +50,12 @@ public class vObjectPropertiesPlusPlugIn : PlugIn
       DebugLog($"OnLoad: RegisterPanel FAILED: {ex}");
     }
 
-    // Open the panel the first time (or whenever it is not already visible)
-    RhinoApp.Idle += OpenPanelOnFirstIdle;
-
     return LoadReturnCode.Success;
   }
 
   protected override void ObjectPropertiesPages(ObjectPropertiesPageCollection collection)
   {
     collection.Add(new Views.vObjectPropertiesPlusLauncherPage());
-  }
-
-  private static void OpenPanelOnFirstIdle(object? sender, EventArgs e)
-  {
-    RhinoApp.Idle -= OpenPanelOnFirstIdle;
-    var doc = RhinoDoc.ActiveDoc;
-    var panelGuid = typeof(Views.vObjectPropertiesPlusPanel).GUID;
-    DebugLog($"OpenPanelOnFirstIdle: doc={(doc?.Name ?? "null")} panelGuid={panelGuid}");
-    try
-    {
-      if (doc != null)
-        Panels.OpenPanel(panelGuid);
-      else
-        Panels.OpenPanel(panelGuid);
-      DebugLog("OpenPanelOnFirstIdle: OpenPanel called.");
-    }
-    catch (Exception ex)
-    {
-      DebugLog($"OpenPanelOnFirstIdle: OpenPanel FAILED: {ex}");
-    }
   }
 
   internal static System.Drawing.Icon LoadPanelIcon()
@@ -89,8 +66,7 @@ public class vObjectPropertiesPlusPlugIn : PlugIn
       string pngPath = Path.Combine(dir, "vObjectPropertiesPlus.png");
       if (File.Exists(pngPath))
       {
-        // Do NOT use 'using' here — the HICON from GetHicon() references the
-        // bitmap's pixel data; disposing bmp invalidates the handle.
+        // Keep bitmap alive - don't dispose it or the icon handle becomes invalid
         var bmp = new System.Drawing.Bitmap(pngPath);
         return System.Drawing.Icon.FromHandle(bmp.GetHicon());
       }
