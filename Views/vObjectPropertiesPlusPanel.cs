@@ -102,6 +102,18 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     public int SegmentIndex { get; init; }
   }
 
+  private class SelectionItem
+  {
+    public RhinoObject? Object { get; init; }
+    public CurveInfo? Segment { get; init; }
+    
+    public bool IsSegment => Segment != null;
+    public Guid ObjectId => IsSegment ? Segment!.ParentObject.Id : Object!.Id;
+    
+    public static SelectionItem FromObject(RhinoObject obj) => new() { Object = obj };
+    public static SelectionItem FromSegment(CurveInfo segment) => new() { Segment = segment };
+  }
+
   private readonly RectangleSideHighlightConduit _rectangleSideHighlightConduit = new();
   private RectangleHighlightKind _rectangleHighlightKind = RectangleHighlightKind.None;
   private readonly FocusHighlightConduit _focusHighlightConduit = new();
@@ -110,10 +122,11 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private readonly List<Guid> _selectedObjectIds = new();
   private List<RhinoObject> _allSelectedObjects = new();
   private List<CurveInfo> _currentCurveInfos = new();
-  private List<RhinoObject?> _typeDropMap = new();
+  private List<SelectionItem?> _typeDropMap = new();
   private List<List<RhinoObject>> _dropdownClusters = new();
   private readonly List<string> _clusterKeyOrder = new();
   private Guid _focusedObjectId = Guid.Empty;
+  private int _focusedSegmentIndex = -1;
   private bool _isUpdatingUi;
   private long _lastUserEditMs;
   private uint _unitPrefsLoadedDocSerial;
@@ -460,6 +473,119 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     Application.Instance.AsyncInvoke(() => UpdateFromSelection(doc, selected));
   }
 
+  private void RefreshForSegmentSelection(List<CurveInfo> segments)
+  {
+    if (_doc == null || segments.Count == 0)
+      return;
+    
+    _isUpdatingUi = true;
+    try
+    {
+      _currentCurveInfos = segments;
+      
+      // Update type dropdown to show focused segment
+      var typeItems = new List<string>();
+      _typeDropMap = new List<SelectionItem?>();
+      
+      typeItems.Add(BuildSegmentTypeText(segments));
+      _typeDropMap.Add(null);
+      
+      if (segments.Count > 1)
+      {
+        foreach (var curveInfo in segments)
+        {
+          string segmentLabel = BuildCurveInfoLabel(curveInfo, _doc);
+          typeItems.Add(segmentLabel);
+          _typeDropMap.Add(SelectionItem.FromSegment(curveInfo));
+        }
+      }
+      
+      _typeDrop.DataStore = typeItems;
+      int focusedMapIdx = segments.Count > 1
+        ? _typeDropMap.FindIndex(item => item != null && item.IsSegment && 
+                                           item.Segment!.SegmentIndex == _focusedSegmentIndex &&
+                                           item.Segment!.ParentObject.Id == _focusedObjectId)
+        : -1;
+      _typeDrop.SelectedIndex = focusedMapIdx > 0 ? focusedMapIdx : 0;
+      
+      // Disable object-level attributes for segments
+      SetControlEnabled(_nameBox, false);
+      SetControlEnabled(_layerDrop, false);
+      SetControlEnabled(_displayColorDrop, false);
+      SetControlEnabled(_displayColorButton, false);
+      SetControlEnabled(_displayModeDrop, false);
+      SetControlEnabled(_linetypeDrop, false);
+      SetControlEnabled(_linetypeScaleStepper, false);
+      SetControlEnabled(_printColorDrop, false);
+      SetControlEnabled(_printColorButton, false);
+      SetControlEnabled(_printWidthDrop, false);
+      SetControlEnabled(_sectionStyleDrop, false);
+      SetControlEnabled(_hyperlinkButton, false);
+      SetControlEnabled(_customMeshCheck, false);
+      SetControlEnabled(_customMeshAdjustButton, false);
+      SetControlEnabled(_castsShadowsCheck, false);
+      SetControlEnabled(_receivesShadowsCheck, false);
+      SetControlEnabled(_densityStepper, false);
+      SetControlEnabled(_showIsocurveCheck, false);
+      
+      // Enable curve-specific controls
+      SetControlEnabled(_totalLengthBox, true);
+      SetControlEnabled(_curveMetricBox, true);
+      SetControlEnabled(_curveMetricUnitDrop, true);
+      SetControlEnabled(_radiusBox, true);
+      SetControlEnabled(_diameterBox, true);
+      SetControlEnabled(_totalLengthUnitDrop, true);
+      
+      // Compute curve metrics for the segment(s)
+      double totalLength = 0.0;
+      var radii = new List<double>();
+      var modelUnits = _doc.ModelUnitSystem;
+      
+      foreach (var curveInfo in segments)
+      {
+        var curve = curveInfo.Curve;
+        if (curve != null)
+        {
+          totalLength += curve.GetLength();
+          
+          if (curve is ArcCurve arc)
+          {
+            radii.Add(arc.Radius);
+          }
+          else if (curve.TryGetCircle(out Circle circle))
+          {
+            radii.Add(circle.Radius);
+          }
+        }
+      }
+      
+      // Get current unit systems from dropdowns
+      UnitSystem totalLengthUnits = GetSelectedUnitSystem(_totalLengthUnitDrop, _doc);
+      UnitSystem radiusUnits = GetSelectedUnitSystem(_radiusUnitDrop, _doc);
+      
+      // Update curve fields
+      _totalLengthBox.Text = FormatInfoNumber(ConvertLength(totalLength, modelUnits, totalLengthUnits), _totalLengthUnitDrop);
+      
+      if (radii.Count > 0)
+      {
+        double avgRadius = radii.Average();
+        bool allSame = radii.All(r => Math.Abs(r - avgRadius) < 0.0001);
+        double displayRadius = ConvertLength(avgRadius, modelUnits, radiusUnits);
+        SetEditableTextValue(_radiusBox, allSame ? FormatInfoNumber(displayRadius, _radiusUnitDrop) : VariesText);
+        SetEditableTextValue(_diameterBox, allSame ? FormatInfoNumber(displayRadius * 2.0, _diameterUnitDrop) : VariesText);
+      }
+      else
+      {
+        SetEditableTextValue(_radiusBox, "-");
+        SetEditableTextValue(_diameterBox, "-");
+      }
+    }
+    finally
+    {
+      _isUpdatingUi = false;
+    }
+  }
+
   public void UpdateFromSelection(RhinoDoc? doc, IEnumerable<RhinoObject> objects)
   {
     _doc = doc;
@@ -474,6 +600,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     bool isFocusDrillDown = _focusedObjectId != Guid.Empty
       && objectList.Count == 1
       && objectList[0].Id == _focusedObjectId;
+    
+    bool isSegmentFocus = _focusedSegmentIndex >= 0;
 
     // If the incoming selection set matches the recorded full selection, this is a
     // Rhino-internal refresh (e.g. after ModifyAttributes / geometry replace), not a
@@ -484,11 +612,29 @@ public sealed class vObjectPropertiesPlusPanel : Panel
         && objectList.All(o => _allSelectedObjects.Any(a => a.Id == o.Id));
       if (isSameSelectionSet)
       {
-        var freshFocused = objectList.FirstOrDefault(o => o.Id == _focusedObjectId);
-        if (freshFocused != null)
+        if (isSegmentFocus)
         {
-          UpdateFromSelection(doc, new[] { freshFocused });
-          return;
+          // Restore segment focus
+          var freshFocused = objectList.FirstOrDefault(o => o.Id == _focusedObjectId);
+          if (freshFocused != null)
+          {
+            var segments = GetInfoCurvesForSelection(new[] { freshFocused }, out _);
+            var targetSegment = segments.FirstOrDefault(s => s.SegmentIndex == _focusedSegmentIndex);
+            if (targetSegment != null)
+            {
+              RefreshForSegmentSelection(new List<CurveInfo> { targetSegment });
+              return;
+            }
+          }
+        }
+        else
+        {
+          var freshFocused = objectList.FirstOrDefault(o => o.Id == _focusedObjectId);
+          if (freshFocused != null)
+          {
+            UpdateFromSelection(doc, new[] { freshFocused });
+            return;
+          }
         }
       }
     }
@@ -499,6 +645,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       _dropdownClusters = BuildDropdownClusters(objectList);
       _allSelectedObjects = _dropdownClusters.SelectMany(c => c).ToList();
       _focusedObjectId = Guid.Empty;
+      _focusedSegmentIndex = -1;
       _selectedObjectIds.Clear();
       foreach (var o in objectList)
         _selectedObjectIds.Add(o.Id);
@@ -628,7 +775,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     
     // Populate type dropdown
     var typeItems = new List<string>();
-    _typeDropMap = new List<RhinoObject?>();
+    _typeDropMap = new List<SelectionItem?>();
     
     // If we have segment selection, show each segment separately
     if (hasSegmentSelection && _currentCurveInfos.Any(ci => ci.IsSegment))
@@ -642,7 +789,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
         {
           string segmentLabel = BuildCurveInfoLabel(curveInfo, doc);
           typeItems.Add(segmentLabel);
-          _typeDropMap.Add(curveInfo.ParentObject);
+          _typeDropMap.Add(SelectionItem.FromSegment(curveInfo));
         }
       }
     }
@@ -666,14 +813,15 @@ public sealed class vObjectPropertiesPlusPanel : Panel
           foreach (var o in cluster)
           {
             typeItems.Add(BuildObjectDropLabel(o, doc));
-            _typeDropMap.Add(o);
+            _typeDropMap.Add(SelectionItem.FromObject(o));
           }
         }
       }
     }
     _typeDrop.DataStore = typeItems;
     int focusedMapIdx = isFocusDrillDown
-      ? _typeDropMap.FindIndex(o => o?.Id == _focusedObjectId)
+      ? _typeDropMap.FindIndex(item => item != null && item.ObjectId == _focusedObjectId && 
+                                         (!item.IsSegment || item.Segment!.SegmentIndex == _focusedSegmentIndex))
       : -1;
     _typeDrop.SelectedIndex = focusedMapIdx > 0 ? focusedMapIdx : 0;
     
@@ -937,6 +1085,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     SetControlEnabled(_typeDrop, false);
     _allSelectedObjects.Clear();
     _focusedObjectId = Guid.Empty;
+    _focusedSegmentIndex = -1;
     _selectedObjectIds.Clear();
     _nameBox.Text = "";
     SetControlEnabled(_nameBox, false);
@@ -1349,12 +1498,13 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       return;
 
     int idx = _typeDrop.SelectedIndex;
-    if (idx <= 0 || _doc == null || _allSelectedObjects.Count < 2)
+    if (idx <= 0 || _doc == null)
     {
       // Restore full selection view.
-      if (_focusedObjectId != Guid.Empty)
+      if (_focusedObjectId != Guid.Empty || _focusedSegmentIndex >= 0)
       {
         _focusedObjectId = Guid.Empty;
+        _focusedSegmentIndex = -1;
         _selectedObjectIds.Clear();
         foreach (var o in _allSelectedObjects)
           _selectedObjectIds.Add(o.Id);
@@ -1373,20 +1523,47 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       return;
     }
 
-    RhinoObject focused = _typeDropMap[idx]!;
-    _focusedObjectId = focused.Id;
+    var selectionItem = _typeDropMap[idx]!;
+    
+    if (selectionItem.IsSegment)
+    {
+      // Focus on a specific segment
+      var segment = selectionItem.Segment!;
+      _focusedObjectId = segment.ParentObject.Id;
+      _focusedSegmentIndex = segment.SegmentIndex;
+      
+      // Scope edits to focused object only
+      _selectedObjectIds.Clear();
+      _selectedObjectIds.Add(segment.ParentObject.Id);
+      
+      // Highlight the parent object (segments can't be independently highlighted via conduit)
+      _focusHighlightConduit.SetObject(segment.ParentObject);
+      _focusHighlightConduit.Enabled = true;
+      _doc.Views.Redraw();
+      
+      // Refresh panel for just this segment
+      var singleSegmentList = new List<CurveInfo> { segment };
+      RefreshForSegmentSelection(singleSegmentList);
+    }
+    else
+    {
+      // Focus on a regular object
+      RhinoObject focused = selectionItem.Object!;
+      _focusedObjectId = focused.Id;
+      _focusedSegmentIndex = -1;
 
-    // Scope edits to focused object only.
-    _selectedObjectIds.Clear();
-    _selectedObjectIds.Add(focused.Id);
+      // Scope edits to focused object only.
+      _selectedObjectIds.Clear();
+      _selectedObjectIds.Add(focused.Id);
 
-    // Show orange highlight on focused object via conduit (selection unchanged).
-    _focusHighlightConduit.SetObject(focused);
-    _focusHighlightConduit.Enabled = true;
-    _doc.Views.Redraw();
+      // Show orange highlight on focused object via conduit (selection unchanged).
+      _focusHighlightConduit.SetObject(focused);
+      _focusHighlightConduit.Enabled = true;
+      _doc.Views.Redraw();
 
-    // Refresh panel for just this one object.
-    UpdateFromSelection(_doc, new[] { focused });
+      // Refresh panel for just this one object.
+      UpdateFromSelection(_doc, new[] { focused });
+    }
   }
 
   private static string LayerName(RhinoDoc? doc, int layerIndex)
