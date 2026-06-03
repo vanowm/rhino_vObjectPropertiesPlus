@@ -517,6 +517,17 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       UpdateFromSelection(_doc, new[] { parentObject });
       _isUpdatingUi = true; // Re-enable update guard
       
+      // Restore segment highlight (UpdateFromSelection sets it to whole object)
+      if (focusedSegmentIndex >= 0)
+      {
+        var focusedSegment = segments.FirstOrDefault(s => s.SegmentIndex == focusedSegmentIndex);
+        if (focusedSegment != null)
+        {
+          _focusHighlightConduit.SetSegment(focusedSegment.ParentObject, focusedSegment.Curve);
+          _focusHighlightConduit.Enabled = true;
+        }
+      }
+      
       // Now override type dropdown with segment list
       _typeDrop.DataStore = typeItems;
       _typeDrop.SelectedIndex = focusedMapIdx > 0 ? focusedMapIdx : 0;
@@ -2674,6 +2685,10 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
   private void OnRectangleDimensionFocusChanged(RectangleHighlightKind kind)
   {
+    // Skip rectangle highlighting when a segment is focused
+    if (_focusedSegmentIndex >= 0)
+      return;
+    
     _rectangleHighlightKind = kind;
     RefreshRectangleSideHighlight();
   }
