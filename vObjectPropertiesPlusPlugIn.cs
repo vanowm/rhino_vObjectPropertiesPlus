@@ -81,22 +81,53 @@ public class vObjectPropertiesPlusPlugIn : PlugIn
 
     try
     {
-      string dir = Path.GetDirectoryName(typeof(vObjectPropertiesPlusPlugIn).Assembly.Location) ?? AppContext.BaseDirectory;
-      string pngPath = Path.Combine(dir, "vObjectPropertiesPlus.png");
-      DebugLog($"LoadPanelIcon: looking for icon at '{pngPath}'");
+      var asm = typeof(vObjectPropertiesPlusPlugIn).Assembly;
       
-      if (File.Exists(pngPath))
+      // Try loading from embedded .ico resource first
+      using (var stream = asm.GetManifestResourceStream("vObjectPropertiesPlus.ico"))
       {
-        // Load PNG and keep bitmap alive to prevent icon handle invalidation
-        _iconBitmap = new System.Drawing.Bitmap(pngPath);
-        DebugLog($"LoadPanelIcon: loaded bitmap {_iconBitmap.Width}x{_iconBitmap.Height}");
-        
-        _cachedPanelIcon = System.Drawing.Icon.FromHandle(_iconBitmap.GetHicon());
-        DebugLog("LoadPanelIcon: created icon from bitmap");
+        if (stream != null)
+        {
+          DebugLog("LoadPanelIcon: loading from embedded .ico resource");
+          _cachedPanelIcon = new System.Drawing.Icon(stream);
+          DebugLog($"LoadPanelIcon: loaded icon {_cachedPanelIcon.Width}x{_cachedPanelIcon.Height}");
+          return _cachedPanelIcon;
+        }
+      }
+      
+      // Fallback to embedded PNG resource
+      using (var stream = asm.GetManifestResourceStream("vObjectPropertiesPlus.png"))
+      {
+        if (stream != null)
+        {
+          DebugLog("LoadPanelIcon: loading from embedded .png resource");
+          _iconBitmap = new System.Drawing.Bitmap(stream);
+          DebugLog($"LoadPanelIcon: loaded bitmap {_iconBitmap.Width}x{_iconBitmap.Height}");
+          _cachedPanelIcon = System.Drawing.Icon.FromHandle(_iconBitmap.GetHicon());
+          return _cachedPanelIcon;
+        }
+      }
+      
+      // Fallback to file system
+      string dir = Path.GetDirectoryName(asm.Location) ?? AppContext.BaseDirectory;
+      string icoPath = Path.Combine(dir, "vObjectPropertiesPlus.ico");
+      if (File.Exists(icoPath))
+      {
+        DebugLog($"LoadPanelIcon: loading from file '{icoPath}'");
+        _cachedPanelIcon = new System.Drawing.Icon(icoPath);
         return _cachedPanelIcon;
       }
       
-      DebugLog("LoadPanelIcon: PNG file not found, using system icon");
+      string pngPath = Path.Combine(dir, "vObjectPropertiesPlus.png");
+      if (File.Exists(pngPath))
+      {
+        DebugLog($"LoadPanelIcon: loading from file '{pngPath}'");
+        _iconBitmap = new System.Drawing.Bitmap(pngPath);
+        _cachedPanelIcon = System.Drawing.Icon.FromHandle(_iconBitmap.GetHicon());
+        return _cachedPanelIcon;
+      }
+      
+      DebugLog("LoadPanelIcon: no icon resource found, using system icon");
     }
     catch (Exception ex)
     {

@@ -32,11 +32,17 @@
     <EmbeddedResource Include="vObjectPropertiesPlus.png">
       <LogicalName>vObjectPropertiesPlus.png</LogicalName>
     </EmbeddedResource>
+    <EmbeddedResource Include="vObjectPropertiesPlus.ico">
+      <LogicalName>vObjectPropertiesPlus.ico</LogicalName>
+    </EmbeddedResource>
     <EmbeddedResource Include="vObjectPropertiesPlus.bmp">
       <LogicalName>vObjectPropertiesPlus.bmp</LogicalName>
     </EmbeddedResource>
 
     <Content Include="vObjectPropertiesPlus.svg">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="vObjectPropertiesPlus.ico">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
     <Content Include="vObjectPropertiesPlus.png">
