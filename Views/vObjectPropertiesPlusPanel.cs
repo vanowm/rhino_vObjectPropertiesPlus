@@ -1480,9 +1480,46 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       {
         hasSegmentSelection = true;
         vObjectPropertiesPlusPlugIn.DebugLog($"GetInfoCurvesForSelection: Object {obj.Id} has {selectedSubObjects.Length} selected subobjects");
+        
+        // Extract the actual segment curves from the selected subobjects
+        foreach (var componentIndex in selectedSubObjects)
+        {
+          vObjectPropertiesPlusPlugIn.DebugLog($"GetInfoCurvesForSelection: ComponentIndex Type={componentIndex.ComponentIndexType} Index={componentIndex.Index}");
+          
+          if (curve is PolyCurve polyCurve && componentIndex.Index >= 0)
+          {
+            // Get the specific segment from the polycurve
+            var segment = polyCurve.SegmentCurve(componentIndex.Index);
+            if (segment != null)
+            {
+              curves.Add(segment);
+              vObjectPropertiesPlusPlugIn.DebugLog($"GetInfoCurvesForSelection: Added PolyCurve segment {componentIndex.Index}, length={segment.GetLength()}");
+            }
+          }
+          else if (curve is Rhino.Geometry.PolylineCurve polyline && componentIndex.Index >= 0)
+          {
+            // Get the specific line segment from the polyline
+            var pl = polyline.ToPolyline();
+            if (pl != null && componentIndex.Index < pl.Count - 1)
+            {
+              var lineSegment = new Rhino.Geometry.LineCurve(pl[componentIndex.Index], pl[componentIndex.Index + 1]);
+              curves.Add(lineSegment);
+              vObjectPropertiesPlusPlugIn.DebugLog($"GetInfoCurvesForSelection: Added Polyline segment {componentIndex.Index}, length={lineSegment.GetLength()}");
+            }
+          }
+          else
+          {
+            // For other curve types or invalid indices, use the whole curve
+            vObjectPropertiesPlusPlugIn.DebugLog($"GetInfoCurvesForSelection: Unsupported curve type or invalid index, using whole curve");
+            curves.Add(curve);
+          }
+        }
       }
-
-      curves.Add(curve);
+      else
+      {
+        // No segment selection, use the whole curve
+        curves.Add(curve);
+      }
     }
 
     return curves;
