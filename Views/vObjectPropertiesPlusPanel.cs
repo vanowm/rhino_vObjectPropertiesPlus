@@ -473,7 +473,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     Application.Instance.AsyncInvoke(() => UpdateFromSelection(doc, selected));
   }
 
-  private void RefreshForSegmentSelection(List<CurveInfo> segments)
+  private void RefreshForSegmentSelection(List<CurveInfo> segments, int focusedSegmentIndex = -1)
   {
     if (_doc == null || segments.Count == 0)
       return;
@@ -483,29 +483,29 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     {
       _currentCurveInfos = segments;
       
-      // Update type dropdown to show focused segment
+      // Update type dropdown to show all segments
       var typeItems = new List<string>();
       _typeDropMap = new List<SelectionItem?>();
       
       typeItems.Add(BuildSegmentTypeText(segments));
       _typeDropMap.Add(null);
       
-      if (segments.Count > 1)
+      foreach (var curveInfo in segments)
       {
-        foreach (var curveInfo in segments)
-        {
-          string segmentLabel = BuildCurveInfoLabel(curveInfo, _doc);
-          typeItems.Add(segmentLabel);
-          _typeDropMap.Add(SelectionItem.FromSegment(curveInfo));
-        }
+        string segmentLabel = BuildCurveInfoLabel(curveInfo, _doc);
+        typeItems.Add(segmentLabel);
+        _typeDropMap.Add(SelectionItem.FromSegment(curveInfo));
       }
       
       _typeDrop.DataStore = typeItems;
-      int focusedMapIdx = segments.Count > 1
-        ? _typeDropMap.FindIndex(item => item != null && item.IsSegment && 
-                                           item.Segment!.SegmentIndex == _focusedSegmentIndex &&
-                                           item.Segment!.ParentObject.Id == _focusedObjectId)
-        : -1;
+      
+      // Select the focused segment if specified, otherwise select summary
+      int focusedMapIdx = -1;
+      if (focusedSegmentIndex >= 0)
+      {
+        focusedMapIdx = _typeDropMap.FindIndex(item => item != null && item.IsSegment && 
+                                                         item.Segment!.SegmentIndex == focusedSegmentIndex);
+      }
       _typeDrop.SelectedIndex = focusedMapIdx > 0 ? focusedMapIdx : 0;
       
       // Disable object-level attributes for segments
@@ -537,11 +537,17 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       SetControlEnabled(_totalLengthUnitDrop, true);
       
       // Compute curve metrics for the segment(s)
+      // If a specific segment is focused, show only that segment's metrics
+      // Otherwise show combined metrics for all segments
       double totalLength = 0.0;
       var radii = new List<double>();
       var modelUnits = _doc.ModelUnitSystem;
       
-      foreach (var curveInfo in segments)
+      var segmentsToMeasure = focusedSegmentIndex >= 0
+        ? segments.Where(s => s.SegmentIndex == focusedSegmentIndex).ToList()
+        : segments;
+      
+      foreach (var curveInfo in segmentsToMeasure)
       {
         var curve = curveInfo.Curve;
         if (curve != null)
@@ -619,10 +625,9 @@ public sealed class vObjectPropertiesPlusPanel : Panel
           if (freshFocused != null)
           {
             var segments = GetInfoCurvesForSelection(new[] { freshFocused }, out _);
-            var targetSegment = segments.FirstOrDefault(s => s.SegmentIndex == _focusedSegmentIndex);
-            if (targetSegment != null)
+            if (segments.Any(s => s.SegmentIndex == _focusedSegmentIndex))
             {
-              RefreshForSegmentSelection(new List<CurveInfo> { targetSegment });
+              RefreshForSegmentSelection(segments, _focusedSegmentIndex);
               return;
             }
           }
@@ -1541,9 +1546,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       _focusHighlightConduit.Enabled = true;
       _doc.Views.Redraw();
       
-      // Refresh panel for just this segment
-      var singleSegmentList = new List<CurveInfo> { segment };
-      RefreshForSegmentSelection(singleSegmentList);
+      // Refresh panel for this segment, but keep all segments in dropdown
+      RefreshForSegmentSelection(_currentCurveInfos, segment.SegmentIndex);
     }
     else
     {
