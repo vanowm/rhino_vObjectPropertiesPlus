@@ -1,5 +1,8 @@
 using System;
+using System.Linq;
 using System.Runtime.Versioning;
+using Rhino;
+using Rhino.DocObjects;
 using Rhino.UI;
 
 namespace vObjectPropertiesPlus.Views;
@@ -14,6 +17,12 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
     Content = new Eto.Forms.Label { Text = "↗ Object+ Panel" }
   };
 
+  public vObjectPropertiesPlusLauncherPage()
+  {
+    RhinoDoc.DeselectAllObjects += OnDeselectAll;
+    RhinoDoc.DeselectObjects    += OnDeselect;
+  }
+
   public override string EnglishPageTitle => "Object+";
   public override object PageControl => _control;
 
@@ -27,6 +36,22 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
     if (active)
       try { Panels.OpenPanel(PanelGuid); } catch { }
     return base.OnActivate(active);
+  }
+
+  private void OnDeselectAll(object? sender, RhinoDeselectAllObjectsEventArgs e)
+  {
+    CloseIfNothingSelected(e.Document);
+  }
+
+  private void OnDeselect(object? sender, RhinoObjectSelectionEventArgs e)
+  {
+    CloseIfNothingSelected(e.Document);
+  }
+
+  private static void CloseIfNothingSelected(RhinoDoc? doc)
+  {
+    if (doc == null || doc.Objects.GetSelectedObjects(false, false).Any()) return;
+    try { Panels.ClosePanel(PanelGuid); } catch { }
   }
 }
 
