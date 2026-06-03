@@ -2973,30 +2973,25 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
   /// <summary>
   /// Centralized method to enable/disable controls with consistent styling.
-  /// TextBox: Use ReadOnly to control editability. For editable boxes, also manage BackgroundColor
-  /// to ensure consistent disabled appearance (transparent when disabled like display-only boxes).
-  /// Other controls: Use Enabled property only.
+  /// TextBox/TextArea: Set both ReadOnly and Enabled for proper state control.
+  /// All other controls: Use Enabled property only (framework handles visual state).
   /// </summary>
   private static void SetControlEnabled(Control control, bool enabled)
   {
     switch (control)
     {
       case TextBox tb:
-        // Check if this is a display-only box (always has transparent background)
-        bool isDisplayOnly = tb.TabIndex == -1; // Display-only boxes have TabIndex=-1
-        
-        if (isDisplayOnly)
+        // Display-only boxes stay ReadOnly=true always
+        if (tb.TabIndex == -1)
         {
-          // Display-only: keep ReadOnly=true always, just set Enabled
+          // Keep ReadOnly=true, just set Enabled
           tb.Enabled = enabled;
         }
         else
         {
-          // Editable: control ReadOnly state and match background to display-only when disabled
+          // Editable boxes: control both ReadOnly and Enabled
           tb.ReadOnly = !enabled;
           tb.Enabled = enabled;
-          // Make disabled editable boxes look like display-only boxes (transparent)
-          tb.BackgroundColor = enabled ? SystemColors.WindowBackground : Colors.Transparent;
         }
         break;
       case TextArea ta:
