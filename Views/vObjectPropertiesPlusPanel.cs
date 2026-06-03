@@ -512,6 +512,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
       // Re-enable all controls that were disabled in SetEmptyState
       _typeDrop.Enabled = true;
+      _nameBox.ReadOnly = false;
       _nameBox.Enabled = true;
       _layerDrop.Enabled = true;
       _displayColorDrop.Enabled = true;
@@ -880,6 +881,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _focusedObjectId = Guid.Empty;
     _selectedObjectIds.Clear();
     _nameBox.Text = "";
+    _nameBox.ReadOnly = true;
     _nameBox.Enabled = false;
     _currentLayerFullPath = "-";
     SetLayerDropValue(_layerDrop, null, "-", _layerExpandedState);
@@ -928,7 +930,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _totalLengthUnitDrop.Enabled = false;
     _infoFormatDrop.Enabled = false;
     _infoPrecisionDrop.Enabled = false;
-    _curveMetricBox.ReadOnly = false;
+    _curveMetricBox.ReadOnly = true;
     _radiusNameLabel.Text = "Radius";
     _diameterNameLabel.Text = "Diameter";
     SetEditableTextValue(_curveMetricBox, "-");
@@ -939,11 +941,11 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _diameterBox.Enabled = false;
     _radiusNameLabel.Visible = false;
     _radiusBox.Visible = false;
-    _radiusBox.ReadOnly = false;
+    _radiusBox.ReadOnly = true;
     _radiusUnitDrop.Visible = false;
     _diameterNameLabel.Visible = false;
     _diameterBox.Visible = false;
-    _diameterBox.ReadOnly = false;
+    _diameterBox.ReadOnly = true;
     _diameterUnitDrop.Visible = false;
     _polygonSidesLabel.Visible = false;
     _polygonSidesStepper.Visible = false;
