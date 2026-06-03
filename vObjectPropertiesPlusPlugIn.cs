@@ -46,9 +46,6 @@ public class vObjectPropertiesPlusPlugIn : PlugIn
     {
       Panels.RegisterPanel(this, typeof(Views.vObjectPropertiesPlusPanel), "Object+", LoadPanelIcon());
       DebugLog("OnLoad: RegisterPanel succeeded.");
-      
-      // Show panel once to ensure it appears in Windows->Panels menu
-      RhinoApp.Idle += OnFirstIdle;
     }
     catch (Exception ex)
     {
@@ -56,29 +53,6 @@ public class vObjectPropertiesPlusPlugIn : PlugIn
     }
 
     return LoadReturnCode.Success;
-  }
-
-  private static void OnFirstIdle(object? sender, EventArgs e)
-  {
-    RhinoApp.Idle -= OnFirstIdle;
-    var panelGuid = typeof(Views.vObjectPropertiesPlusPanel).GUID;
-    DebugLog($"OnFirstIdle: showing panel GUID={panelGuid} for menu registration");
-    try
-    {
-      // Show panel briefly then close to register it in menu
-      Panels.OpenPanel(panelGuid);
-      DebugLog("OnFirstIdle: panel opened successfully");
-      // Close after a moment so it's not intrusive
-      RhinoApp.Idle += (s, args) =>
-      {
-        Panels.ClosePanel(panelGuid);
-        DebugLog("OnFirstIdle: panel closed after registration");
-      };
-    }
-    catch (Exception ex)
-    {
-      DebugLog($"OnFirstIdle: exception: {ex}");
-    }
   }
 
   internal static System.Drawing.Icon LoadPanelIcon()

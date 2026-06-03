@@ -511,79 +511,47 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       }
 
       // Re-enable all controls that were disabled in SetEmptyState
-      _typeDrop.Enabled = true;
-      _typeDrop.BackgroundColor = SystemColors.Control;
-      _typeDrop.TextColor = SystemColors.ControlText;
-      _nameBox.ReadOnly = false;
-      _nameBox.Enabled = true;
-      _nameBox.BackgroundColor = SystemColors.Control;
-      _nameBox.TextColor = SystemColors.ControlText;
-      _layerDrop.Enabled = true;
-      _layerDrop.BackgroundColor = SystemColors.Control;
-      _layerDrop.TextColor = SystemColors.ControlText;
-      _displayColorDrop.Enabled = true;
-      _displayColorDrop.BackgroundColor = SystemColors.Control;
-      _displayColorDrop.TextColor = SystemColors.ControlText;
-      _displayModeDrop.Enabled = true;
-      _displayModeDrop.BackgroundColor = SystemColors.Control;
-      _displayModeDrop.TextColor = SystemColors.ControlText;
-      _linetypeDrop.Enabled = true;
-      _linetypeDrop.BackgroundColor = SystemColors.Control;
-      _linetypeDrop.TextColor = SystemColors.ControlText;
-      _linetypeScaleStepper.BackgroundColor = SystemColors.Control;
-      _linetypeScaleStepper.TextColor = SystemColors.ControlText;
-      _printColorDrop.Enabled = true;
-      _printColorDrop.BackgroundColor = SystemColors.Control;
-      _printColorDrop.TextColor = SystemColors.ControlText;
-      _printWidthDrop.Enabled = true;
-      _printWidthDrop.BackgroundColor = SystemColors.Control;
-      _printWidthDrop.TextColor = SystemColors.ControlText;
-      _sectionStyleDrop.Enabled = true;
-      _sectionStyleDrop.BackgroundColor = SystemColors.Control;
-      _sectionStyleDrop.TextColor = SystemColors.ControlText;
-      _hyperlinkButton.Enabled = true;
-      _totalLengthBox.Enabled = true;
-      _curveMetricUnitDrop.Enabled = true;
-      _curveMetricUnitDrop.BackgroundColor = SystemColors.Control;
-      _curveMetricUnitDrop.TextColor = SystemColors.ControlText;
-      _totalLengthUnitDrop.Enabled = true;
-      _totalLengthUnitDrop.BackgroundColor = SystemColors.Control;
-      _totalLengthUnitDrop.TextColor = SystemColors.ControlText;
-      _infoFormatDrop.Enabled = true;
-      _infoFormatDrop.BackgroundColor = SystemColors.Control;
-      _infoFormatDrop.TextColor = SystemColors.ControlText;
-      _infoPrecisionDrop.Enabled = true;
-      _infoPrecisionDrop.BackgroundColor = SystemColors.Control;
-      _infoPrecisionDrop.TextColor = SystemColors.ControlText;
-      _curveMetricBox.BackgroundColor = SystemColors.Control;
-      _curveMetricBox.TextColor = SystemColors.ControlText;
-      _radiusBox.BackgroundColor = SystemColors.Control;
-      _radiusBox.TextColor = SystemColors.ControlText;
-      _diameterBox.BackgroundColor = SystemColors.Control;
-      _diameterBox.TextColor = SystemColors.ControlText;
-      _densityStepper.BackgroundColor = SystemColors.Control;
-      _densityStepper.TextColor = SystemColors.ControlText;
-      _textFontDrop.Enabled = true;
-      _textFontDrop.BackgroundColor = SystemColors.Control;
-      _textFontDrop.TextColor = SystemColors.ControlText;
-      _textHeightStepper.BackgroundColor = SystemColors.Control;
-      _textHeightStepper.TextColor = SystemColors.ControlText;
-      _textHeightUnitDrop.Enabled = true;
-      _textHeightUnitDrop.BackgroundColor = SystemColors.Control;
-      _textHeightUnitDrop.TextColor = SystemColors.ControlText;
-      _textContentArea.Enabled = true;
-      _textContentArea.BackgroundColor = SystemColors.Control;
-      _textContentArea.TextColor = SystemColors.ControlText;
-      _textAlignLeftBtn.Enabled = true;
-      _textAlignCenterBtn.Enabled = true;
-      _textAlignRightBtn.Enabled = true;
-      _textAlignAutoBtn.Enabled = true;
-      _textVAlignTopBtn.Enabled = true;
-      _textVAlignMiddleBtn.Enabled = true;
-      _textVAlignBottomBtn.Enabled = true;
-      _textBoldBtn.Enabled = true;
-      _textItalicBtn.Enabled = true;
-      _textUnderlineBtn.Enabled = true;
+      SetControlEnabled(_typeDrop, true);
+      SetControlEnabled(_nameBox, true);
+      SetControlEnabled(_layerDrop, true);
+      SetControlEnabled(_displayColorDrop, true);
+      SetControlEnabled(_displayColorButton, true);
+      SetControlEnabled(_displayModeDrop, true);
+      SetControlEnabled(_linetypeDrop, true);
+      SetControlEnabled(_linetypeScaleStepper, true);
+      SetControlEnabled(_printColorDrop, true);
+      SetControlEnabled(_printColorButton, true);
+      SetControlEnabled(_printWidthDrop, true);
+      SetControlEnabled(_sectionStyleDrop, true);
+      SetControlEnabled(_hyperlinkButton, true);
+      SetControlEnabled(_customMeshCheck, true);
+      SetControlEnabled(_customMeshAdjustButton, true);
+      SetControlEnabled(_castsShadowsCheck, true);
+      SetControlEnabled(_receivesShadowsCheck, true);
+      SetControlEnabled(_densityStepper, true);
+      SetControlEnabled(_showIsocurveCheck, true);
+      SetControlEnabled(_totalLengthBox, true);
+      SetControlEnabled(_curveMetricBox, true);
+      SetControlEnabled(_curveMetricUnitDrop, true);
+      SetControlEnabled(_radiusBox, true);
+      SetControlEnabled(_diameterBox, true);
+      SetControlEnabled(_totalLengthUnitDrop, true);
+      SetControlEnabled(_infoFormatDrop, true);
+      SetControlEnabled(_infoPrecisionDrop, true);
+      SetControlEnabled(_textFontDrop, true);
+      SetControlEnabled(_textHeightStepper, true);
+      SetControlEnabled(_textHeightUnitDrop, true);
+      SetControlEnabled(_textContentArea, true);
+      SetControlEnabled(_textAlignLeftBtn, true);
+      SetControlEnabled(_textAlignCenterBtn, true);
+      SetControlEnabled(_textAlignRightBtn, true);
+      SetControlEnabled(_textAlignAutoBtn, true);
+      SetControlEnabled(_textVAlignTopBtn, true);
+      SetControlEnabled(_textVAlignMiddleBtn, true);
+      SetControlEnabled(_textVAlignBottomBtn, true);
+      SetControlEnabled(_textBoldBtn, true);
+      SetControlEnabled(_textItalicBtn, true);
+      SetControlEnabled(_textUnderlineBtn, true);
 
       // Populate type dropdown: item 0 = summary, then per-object items with separators between groups.
       var typeItems = new List<string>();
@@ -621,17 +589,15 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     SetLayerDropValue(_layerDrop, doc, layerText, _layerExpandedState);
     SetDropValue(_displayColorDrop, NormalizeDisplayColorText(CommonOrVaries(objectList, o => SafeString(o.Attributes.ColorSource.ToString()))),
       "By Layer", "By Parent", "By Material", "Custom...");
-    _displayColorButton.Enabled = true;
     UpdateDisplayColorButtonIcon();
     SetDisplayModeDropValue(_displayModeDrop, doc, NormalizeDisplayModeText(CommonOrVaries(objectList, o => (GetPropertyText(o.Attributes, "DisplayModeSource") ?? "By View"))));
     SetLinetypeDropValue(_linetypeDrop, doc, NormalizeLinetypeText(CommonOrVaries(objectList, o => LinetypeText(doc, o.Attributes))));
     string linetypeScaleText = CommonOrVaries(objectList, o => FormatNumber(o.Attributes.LinetypePatternScale));
-    _linetypeScaleStepper.Enabled = linetypeScaleText != VariesText;
+    SetControlEnabled(_linetypeScaleStepper, linetypeScaleText != VariesText);
     if (TryParseDouble(linetypeScaleText, out double lts))
       _linetypeScaleStepper.Value = lts;
     SetDropValue(_printColorDrop, NormalizePrintColorText(CommonOrVaries(objectList, o => SafeString(o.Attributes.PlotColorSource.ToString()))),
       "By Display", "By Layer", "By Parent", "Custom...");
-    _printColorButton.Enabled = true;
     UpdatePrintColorButtonIcon();
     SetPrintWidthDropValue(_printWidthDrop, NormalizePrintWidthText(CommonOrVaries(objectList, o => PlotWidthText(o.Attributes))));
     SetDropValue(_sectionStyleDrop, NormalizeSectionStyleText(CommonOrVaries(objectList, o => (GetPropertyText(o.Attributes, "SectionAttributesSource") ?? "By Layer"))),
@@ -797,7 +763,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       .Select(c => ConvertLength(c.GetLength(), modelUnits, curveMetricUnits))
       .ToList();
 
-    _curveMetricBox.Enabled = showCurveMetric && curveLengths.Count > 0;
+    SetControlEnabled(_curveMetricBox, showCurveMetric && curveLengths.Count > 0);
     if (!showCurveMetric)
     {
       SetEditableTextValue(_curveMetricBox, "-");
@@ -816,8 +782,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     {
       SetEditableTextValue(_radiusBox, "-");
       SetEditableTextValue(_diameterBox, "-");
-      _radiusBox.Enabled = false;
-      _diameterBox.Enabled = false;
+      SetControlEnabled(_radiusBox, false);
+      SetControlEnabled(_diameterBox, false);
       EnsureSegmentReadOnlyInfoBoxesAreSelectable(hasSegmentSelection);
       RefreshRectangleSideHighlight();
       return;
@@ -825,8 +791,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
     if (hasRectangleOnly)
     {
-      _radiusBox.Enabled = true;
-      _diameterBox.Enabled = true;
+      SetControlEnabled(_radiusBox, true);
+      SetControlEnabled(_diameterBox, true);
 
       var displayWidths = rectangleSizes.Select(s => ConvertLength(s.width, modelUnits, radiusUnits)).ToList();
       var displayHeights = rectangleSizes.Select(s => ConvertLength(s.height, modelUnits, diameterUnits)).ToList();
@@ -843,8 +809,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
     if (hasEllipse)
     {
-      _radiusBox.Enabled = true;
-      _diameterBox.Enabled = true;
+      SetControlEnabled(_radiusBox, true);
+      SetControlEnabled(_diameterBox, true);
 
       var displayA = ellipseAxes.Select(e => ConvertLength(e.a, modelUnits, radiusUnits)).ToList();
       var displayB = ellipseAxes.Select(e => ConvertLength(e.b, modelUnits, diameterUnits)).ToList();
@@ -862,9 +828,9 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     if (hasPolygonOnly)
     {
       _polygonSidesStepper.Value = polygonInfoData[0].sides;
-      _polygonSidesStepper.Enabled = true;
-      _radiusBox.Enabled = true;
-      _diameterBox.Enabled = true;
+      SetControlEnabled(_polygonSidesStepper, true);
+      SetControlEnabled(_radiusBox, true);
+      SetControlEnabled(_diameterBox, true);
 
       var displayOuterR = polygonInfoData
         .Select(p => ConvertLength(p.circumRadius, modelUnits, radiusUnits))
@@ -883,8 +849,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       return;
     }
 
-    _radiusBox.Enabled = true;
-    _diameterBox.Enabled = true;
+    SetControlEnabled(_radiusBox, true);
+    SetControlEnabled(_diameterBox, true);
     var displayRadii = circularRadii.Select(r => ConvertLength(r, modelUnits, radiusUnits)).ToList();
     var displayDiameters = circularRadii.Select(r => ConvertLength(r * 2.0, modelUnits, diameterUnits)).ToList();
     bool radiiSame = displayRadii.All(r => RhinoMath.EpsilonEquals(r, displayRadii[0], RhinoMath.SqrtEpsilon));
@@ -920,112 +886,72 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   {
     _typeDrop.DataStore = new[] { "No selection" };
     _typeDrop.SelectedIndex = 0;
-    _typeDrop.Enabled = false;
-    _typeDrop.BackgroundColor = SystemColors.ControlBackground;
-    _typeDrop.TextColor = SystemColors.DisabledText;
+    SetControlEnabled(_typeDrop, false);
     _allSelectedObjects.Clear();
     _focusedObjectId = Guid.Empty;
     _selectedObjectIds.Clear();
     _nameBox.Text = "";
-    _nameBox.ReadOnly = true;
-    _nameBox.Enabled = false;
-    _nameBox.BackgroundColor = SystemColors.ControlBackground;
-    _nameBox.TextColor = SystemColors.DisabledText;
+    SetControlEnabled(_nameBox, false);
     _currentLayerFullPath = "-";
     SetLayerDropValue(_layerDrop, null, "-", _layerExpandedState);
-    _layerDrop.Enabled = false;
-    _layerDrop.BackgroundColor = SystemColors.ControlBackground;
-    _layerDrop.TextColor = SystemColors.DisabledText;
+    SetControlEnabled(_layerDrop, false);
     SetDropValue(_displayColorDrop, "-", "By Layer", "By Parent", "By Material", "Custom...");
-    _displayColorDrop.Enabled = false;
-    _displayColorDrop.BackgroundColor = SystemColors.ControlBackground;
-    _displayColorDrop.TextColor = SystemColors.DisabledText;
+    SetControlEnabled(_displayColorDrop, false);
     SetDisplayModeDropValue(_displayModeDrop, _doc, "-");
-    _displayModeDrop.Enabled = false;
-    _displayModeDrop.BackgroundColor = SystemColors.ControlBackground;
-    _displayModeDrop.TextColor = SystemColors.DisabledText;
+    SetControlEnabled(_displayModeDrop, false);
     SetLinetypeDropValue(_linetypeDrop, _doc, "-");
-    _linetypeDrop.Enabled = false;
-    _linetypeDrop.BackgroundColor = SystemColors.ControlBackground;
-    _linetypeDrop.TextColor = SystemColors.DisabledText;
+    SetControlEnabled(_linetypeDrop, false);
     _linetypeScaleStepper.Value = 1;
-    _linetypeScaleStepper.Enabled = false;
-    _linetypeScaleStepper.BackgroundColor = SystemColors.ControlBackground;
-    _linetypeScaleStepper.TextColor = SystemColors.DisabledText;
+    SetControlEnabled(_linetypeScaleStepper, false);
     SetDropValue(_printColorDrop, "-", "By Display", "By Layer", "By Parent", "Custom...");
-    _printColorDrop.Enabled = false;
-    _printColorDrop.BackgroundColor = SystemColors.ControlBackground;
-    _printColorDrop.TextColor = SystemColors.DisabledText;
+    SetControlEnabled(_printColorDrop, false);
     SetPrintWidthDropValue(_printWidthDrop, "-");
-    _printWidthDrop.Enabled = false;
-    _printWidthDrop.BackgroundColor = SystemColors.ControlBackground;
-    _printWidthDrop.TextColor = SystemColors.DisabledText;
+    SetControlEnabled(_printWidthDrop, false);
     SetDropValue(_sectionStyleDrop, "-", "By Layer", "By Parent", "By Clipping Plane", "Custom...");
-    _sectionStyleDrop.Enabled = false;
-    _sectionStyleDrop.BackgroundColor = SystemColors.ControlBackground;
-    _sectionStyleDrop.TextColor = SystemColors.DisabledText;
+    SetControlEnabled(_sectionStyleDrop, false);
     _hyperlinkLabel.Text = "";
-    _hyperlinkButton.Enabled = false;
-    _displayColorButton.Enabled = false;
+    SetControlEnabled(_hyperlinkButton, false);
+    SetControlEnabled(_displayColorButton, false);
     SetButtonIcon(_displayColorButton, "Layer");
-    _printColorButton.Enabled = false;
+    SetControlEnabled(_printColorButton, false);
     SetButtonIcon(_printColorButton, "Display_Display_Panel");
 
     SetCheckState(_customMeshCheck, null);
-    _customMeshCheck.Enabled = false;
-    _customMeshAdjustButton.Enabled = false;
+    SetControlEnabled(_customMeshCheck, false);
+    SetControlEnabled(_customMeshAdjustButton, false);
     SetCheckState(_castsShadowsCheck, null);
-    _castsShadowsCheck.Enabled = false;
+    SetControlEnabled(_castsShadowsCheck, false);
     SetCheckState(_receivesShadowsCheck, null);
-    _receivesShadowsCheck.Enabled = false;
+    SetControlEnabled(_receivesShadowsCheck, false);
     _densityStepper.Value = -1;
-    _densityStepper.Enabled = false;
-    _densityStepper.BackgroundColor = SystemColors.ControlBackground;
-    _densityStepper.TextColor = SystemColors.DisabledText;
+    SetControlEnabled(_densityStepper, false);
     SetCheckState(_showIsocurveCheck, null);
-    _showIsocurveCheck.Enabled = false;
+    SetControlEnabled(_showIsocurveCheck, false);
 
     _totalLengthBox.Text = "-";
-    _totalLengthBox.Enabled = false;
+    SetControlEnabled(_totalLengthBox, false);
     _totalLengthNameLabel.Text = "Total length";
     _curveMetricLabel.Text = "Length";
     _curveMetricLabel.Visible = true;
     _curveMetricBox.Visible = true;
     _curveMetricUnitDrop.Visible = true;
-    _curveMetricUnitDrop.Enabled = false;
-    _curveMetricUnitDrop.BackgroundColor = SystemColors.ControlBackground;
-    _curveMetricUnitDrop.TextColor = SystemColors.DisabledText;
-    _totalLengthUnitDrop.Enabled = false;
-    _totalLengthUnitDrop.BackgroundColor = SystemColors.ControlBackground;
-    _totalLengthUnitDrop.TextColor = SystemColors.DisabledText;
-    _infoFormatDrop.Enabled = false;
-    _infoFormatDrop.BackgroundColor = SystemColors.ControlBackground;
-    _infoFormatDrop.TextColor = SystemColors.DisabledText;
-    _infoPrecisionDrop.Enabled = false;
-    _infoPrecisionDrop.BackgroundColor = SystemColors.ControlBackground;
-    _infoPrecisionDrop.TextColor = SystemColors.DisabledText;
-    _curveMetricBox.ReadOnly = true;
+    SetControlEnabled(_curveMetricUnitDrop, false);
+    SetControlEnabled(_totalLengthUnitDrop, false);
+    SetControlEnabled(_infoFormatDrop, false);
+    SetControlEnabled(_infoPrecisionDrop, false);
     _radiusNameLabel.Text = "Radius";
     _diameterNameLabel.Text = "Diameter";
     SetEditableTextValue(_curveMetricBox, "-");
-    _curveMetricBox.Enabled = false;
-    _curveMetricBox.BackgroundColor = SystemColors.ControlBackground;
-    _curveMetricBox.TextColor = SystemColors.DisabledText;
+    SetControlEnabled(_curveMetricBox, false);
     SetEditableTextValue(_radiusBox, "-");
-    _radiusBox.Enabled = false;
-    _radiusBox.BackgroundColor = SystemColors.ControlBackground;
-    _radiusBox.TextColor = SystemColors.DisabledText;
+    SetControlEnabled(_radiusBox, false);
     SetEditableTextValue(_diameterBox, "-");
-    _diameterBox.Enabled = false;
-    _diameterBox.BackgroundColor = SystemColors.ControlBackground;
-    _diameterBox.TextColor = SystemColors.DisabledText;
+    SetControlEnabled(_diameterBox, false);
     _radiusNameLabel.Visible = false;
     _radiusBox.Visible = false;
-    _radiusBox.ReadOnly = true;
     _radiusUnitDrop.Visible = false;
     _diameterNameLabel.Visible = false;
     _diameterBox.Visible = false;
-    _diameterBox.ReadOnly = true;
     _diameterUnitDrop.Visible = false;
     _polygonSidesLabel.Visible = false;
     _polygonSidesStepper.Visible = false;
@@ -1034,41 +960,33 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _infoPlusSection.Visible = true;
     _textSection.Visible = false;
     _textFontDrop.SelectedIndex = -1;
-    _textFontDrop.Enabled = false;
-    _textFontDrop.BackgroundColor = SystemColors.ControlBackground;
-    _textFontDrop.TextColor = SystemColors.DisabledText;
-    _textHeightStepper.Enabled = false;
-    _textHeightStepper.BackgroundColor = SystemColors.ControlBackground;
-    _textHeightStepper.TextColor = SystemColors.DisabledText;
-    _textHeightUnitDrop.Enabled = false;
-    _textHeightUnitDrop.BackgroundColor = SystemColors.ControlBackground;
-    _textHeightUnitDrop.TextColor = SystemColors.DisabledText;
+    SetControlEnabled(_textFontDrop, false);
+    SetControlEnabled(_textHeightStepper, false);
+    SetControlEnabled(_textHeightUnitDrop, false);
     _textContentArea.Text = "";
-    _textContentArea.Enabled = false;
-    _textContentArea.BackgroundColor = SystemColors.ControlBackground;
-    _textContentArea.TextColor = SystemColors.DisabledText;
+    SetControlEnabled(_textContentArea, false);
     _textContentArea.Font = new Eto.Drawing.Font(SystemFont.Default, 9f);
     _textContentArea.TextAlignment = TextAlignment.Left;
     _textAlignLeftBtn.Checked = false;
-    _textAlignLeftBtn.Enabled = false;
+    SetControlEnabled(_textAlignLeftBtn, false);
     _textAlignCenterBtn.Checked = false;
-    _textAlignCenterBtn.Enabled = false;
+    SetControlEnabled(_textAlignCenterBtn, false);
     _textAlignRightBtn.Checked = false;
-    _textAlignRightBtn.Enabled = false;
+    SetControlEnabled(_textAlignRightBtn, false);
     _textAlignAutoBtn.Checked = false;
-    _textAlignAutoBtn.Enabled = false;
+    SetControlEnabled(_textAlignAutoBtn, false);
     _textVAlignTopBtn.Checked = false;
-    _textVAlignTopBtn.Enabled = false;
+    SetControlEnabled(_textVAlignTopBtn, false);
     _textVAlignMiddleBtn.Checked = false;
-    _textVAlignMiddleBtn.Enabled = false;
+    SetControlEnabled(_textVAlignMiddleBtn, false);
     _textVAlignBottomBtn.Checked = false;
-    _textVAlignBottomBtn.Enabled = false;
+    SetControlEnabled(_textVAlignBottomBtn, false);
     _textBoldBtn.Checked = false;
-    _textBoldBtn.Enabled = false;
+    SetControlEnabled(_textBoldBtn, false);
     _textItalicBtn.Checked = false;
-    _textItalicBtn.Enabled = false;
+    SetControlEnabled(_textItalicBtn, false);
     _textUnderlineBtn.Checked = false;
-    _textUnderlineBtn.Enabled = false;
+    SetControlEnabled(_textUnderlineBtn, false);
   }
 
   private void EnsureSegmentReadOnlyInfoBoxesAreSelectable(bool hasSegmentSelection)
@@ -1077,11 +995,11 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       return;
 
     if (_curveMetricBox.Visible)
-      _curveMetricBox.Enabled = true;
+      SetControlEnabled(_curveMetricBox, true);
     if (_radiusBox.Visible)
-      _radiusBox.Enabled = true;
+      SetControlEnabled(_radiusBox, true);
     if (_diameterBox.Visible)
-      _diameterBox.Enabled = true;
+      SetControlEnabled(_diameterBox, true);
   }
 
   private const string VariesText = "(varies)";
@@ -2028,7 +1946,6 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private void ApplyDisplayColorSource()
   {
     var value = ParseDisplayColorSource(DropText(_displayColorDrop));
-    _displayColorButton.Enabled = true;
     UpdateDisplayColorButtonIcon();
     ApplyAttributes(a => a.ColorSource = value);
   }
@@ -2105,7 +2022,6 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private void ApplyPrintColorSource()
   {
     var value = ParsePrintColorSource(DropText(_printColorDrop));
-    _printColorButton.Enabled = true;
     UpdatePrintColorButtonIcon();
     ApplyAttributes(a => a.PlotColorSource = value);
   }
@@ -3056,6 +2972,27 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
     textBox.PlaceholderText = string.Empty;
     textBox.Text = value;
+  }
+
+  /// <summary>
+  /// Centralized method to enable/disable controls with consistent styling.
+  /// For TextBox/TextArea: uses ReadOnly property to prevent editing while keeping visual appearance.
+  /// For all other controls: uses Enabled property (OS handles visual disabled state automatically).
+  /// </summary>
+  private static void SetControlEnabled(Control control, bool enabled)
+  {
+    switch (control)
+    {
+      case TextBox tb:
+        tb.ReadOnly = !enabled;
+        break;
+      case TextArea ta:
+        ta.ReadOnly = !enabled;
+        break;
+      default:
+        control.Enabled = enabled;
+        break;
+    }
   }
 
   private static string FormatNumber(double value)
@@ -4525,7 +4462,6 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       var heights = texts.Select(t => ConvertLength(GetEffectiveTextDimStyle(t, doc).TextHeight, modelUnits, units)).ToList();
       bool heightsSame = heights.Count > 0 && heights.All(h => RhinoMath.EpsilonEquals(h, heights[0], RhinoMath.SqrtEpsilon));
       _textHeightStepper.Value = heightsSame ? heights[0] : 0;
-      _textHeightStepper.Enabled = true;
 
       var hAligns = texts.Select(t => t.TextHorizontalAlignment).Distinct().ToList();
       _textAlignLeftBtn.Checked = hAligns.Count == 1 && hAligns[0] == TextHorizontalAlignment.Left;
