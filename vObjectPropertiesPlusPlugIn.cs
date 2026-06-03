@@ -80,7 +80,7 @@ public class vObjectPropertiesPlusPlugIn : PlugIn
     }
   }
 
-  private static System.Drawing.Icon LoadPanelIcon()
+  internal static System.Drawing.Icon LoadPanelIcon()
   {
     try
     {
@@ -88,7 +88,9 @@ public class vObjectPropertiesPlusPlugIn : PlugIn
       string pngPath = Path.Combine(dir, "vObjectPropertiesPlus.png");
       if (File.Exists(pngPath))
       {
-        using var bmp = new System.Drawing.Bitmap(pngPath);
+        // Do NOT use 'using' here — the HICON from GetHicon() references the
+        // bitmap's pixel data; disposing bmp invalidates the handle.
+        var bmp = new System.Drawing.Bitmap(pngPath);
         return System.Drawing.Icon.FromHandle(bmp.GetHicon());
       }
     }
