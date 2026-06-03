@@ -87,24 +87,13 @@ public class vObjectPropertiesPlusPlugIn : PlugIn
       
       if (File.Exists(pngPath))
       {
-        using (var sourceBmp = new System.Drawing.Bitmap(pngPath))
-        {
-          DebugLog($"LoadPanelIcon: loaded bitmap {sourceBmp.Width}x{sourceBmp.Height}");
-          
-          // Resize to 24x24 for better display in containers/tabs
-          // Keep bitmap alive to prevent icon handle invalidation
-          _iconBitmap = new System.Drawing.Bitmap(24, 24);
-          using (var g = System.Drawing.Graphics.FromImage(_iconBitmap))
-          {
-            g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
-            g.DrawImage(sourceBmp, 0, 0, 24, 24);
-          }
-          
-          DebugLog($"LoadPanelIcon: resized to {_iconBitmap.Width}x{_iconBitmap.Height}");
-          _cachedPanelIcon = System.Drawing.Icon.FromHandle(_iconBitmap.GetHicon());
-          DebugLog("LoadPanelIcon: created icon from resized bitmap");
-          return _cachedPanelIcon;
-        }
+        // Load PNG and keep bitmap alive to prevent icon handle invalidation
+        _iconBitmap = new System.Drawing.Bitmap(pngPath);
+        DebugLog($"LoadPanelIcon: loaded bitmap {_iconBitmap.Width}x{_iconBitmap.Height}");
+        
+        _cachedPanelIcon = System.Drawing.Icon.FromHandle(_iconBitmap.GetHicon());
+        DebugLog("LoadPanelIcon: created icon from bitmap");
+        return _cachedPanelIcon;
       }
       
       DebugLog("LoadPanelIcon: PNG file not found, using system icon");
