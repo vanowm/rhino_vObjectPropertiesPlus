@@ -45,7 +45,7 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
     if (active)
     {
       EnsureTabControlHooked();
-      try { Panels.OpenPanel(PanelGuid); } catch { }
+      ShowPanel();
     }
     return base.OnActivate(active);
   }
@@ -133,10 +133,40 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
   private static bool HasSelectedObjects()
     => RhinoDoc.ActiveDoc?.Objects.GetSelectedObjects(false, false).Any() == true;
 
+  private static void ShowPanel()
+  {
+    try
+    {
+      if (!Panels.IsPanelVisible(PanelGuid) && Panels.PanelDockBar(PanelGuid) == Guid.Empty)
+      {
+        Panels.FloatPanel(PanelGuid, Panels.FloatPanelMode.Show);
+        return;
+      }
+
+      Panels.OpenPanel(PanelGuid);
+    }
+    catch { }
+  }
+
+  private static void HidePanel()
+  {
+    try
+    {
+      if (Panels.PanelDockBar(PanelGuid) == Guid.Empty)
+      {
+        Panels.FloatPanel(PanelGuid, Panels.FloatPanelMode.Hide);
+        return;
+      }
+
+      Panels.ClosePanel(PanelGuid);
+    }
+    catch { }
+  }
+
   private static void OpenIfSelected()
   {
     if (!HasSelectedObjects()) return;
-    try { Panels.OpenPanel(PanelGuid); } catch { }
+    ShowPanel();
   }
 
   private void OnPropertiesTabChanged(object? sender, EventArgs e)
@@ -150,8 +180,7 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
       return;
     }
 
-    if (Panels.PanelDockBar(PanelGuid) == Guid.Empty) return;
-    try { Panels.ClosePanel(PanelGuid); } catch { }
+    HidePanel();
   }
 
   private void OnDeselectAll(object? sender, RhinoDeselectAllObjectsEventArgs e)
@@ -163,8 +192,7 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
   private static void CloseIfNothingSelected(RhinoDoc? doc)
   {
     if (doc == null || doc.Objects.GetSelectedObjects(false, false).Any()) return;
-    if (Panels.PanelDockBar(PanelGuid) == Guid.Empty) return;
-    try { Panels.ClosePanel(PanelGuid); } catch { }
+    HidePanel();
   }
 }
 
