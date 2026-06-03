@@ -13,6 +13,7 @@ public class vObjectPropertiesPlusPlugIn : PlugIn
 {
   private static readonly object LogLock = new();
   private static bool _isFirstLog = true;
+  private static System.Drawing.Icon? _cachedPanelIcon;
 
   public override PlugInLoadTime LoadTime => PlugInLoadTime.AtStartup;
   protected override string LocalPlugInName => "vObjectProperties+";
@@ -60,19 +61,34 @@ public class vObjectPropertiesPlusPlugIn : PlugIn
 
   internal static System.Drawing.Icon LoadPanelIcon()
   {
+    if (_cachedPanelIcon != null)
+      return _cachedPanelIcon;
+
     try
     {
       string dir = Path.GetDirectoryName(typeof(vObjectPropertiesPlusPlugIn).Assembly.Location) ?? AppContext.BaseDirectory;
       string pngPath = Path.Combine(dir, "vObjectPropertiesPlus.png");
+      DebugLog($"LoadPanelIcon: looking for icon at '{pngPath}'");
+      
       if (File.Exists(pngPath))
       {
-        // Keep bitmap alive - don't dispose it or the icon handle becomes invalid
+        // Keep bitmap alive in memory - create persistent icon
         var bmp = new System.Drawing.Bitmap(pngPath);
-        return System.Drawing.Icon.FromHandle(bmp.GetHicon());
+        DebugLog($"LoadPanelIcon: loaded bitmap {bmp.Width}x{bmp.Height}");
+        _cachedPanelIcon = System.Drawing.Icon.FromHandle(bmp.GetHicon());
+        DebugLog("LoadPanelIcon: created icon from bitmap");
+        return _cachedPanelIcon;
       }
+      
+      DebugLog("LoadPanelIcon: PNG file not found, using system icon");
     }
-    catch { }
-    return System.Drawing.SystemIcons.Application;
+    catch (Exception ex)
+    {
+      DebugLog($"LoadPanelIcon: exception: {ex.Message}");
+    }
+    
+    _cachedPanelIcon = System.Drawing.SystemIcons.Application;
+    return _cachedPanelIcon;
   }
 
   internal static void DebugLog(string message)
