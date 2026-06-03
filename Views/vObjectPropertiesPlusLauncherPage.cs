@@ -49,8 +49,8 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
     }
     else
     {
-      vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: OnActivate(false) - user left Object+ tab, hiding panel.");
-      HidePanel();
+      vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: OnActivate(false) - user left Object+ tab (panel stays visible if objects selected).");
+      // Don't auto-hide when leaving Object+ tab; let selection events control visibility
     }
     
     return base.OnActivate(active);
@@ -123,11 +123,9 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
     vObjectPropertiesPlusPlugIn.DebugLog($"LauncherPage: OnSelect event. Object+ tab active={_isObjectPlusTabActive}");
     CancelScheduledClose();
     
-    if (_isObjectPlusTabActive)
-    {
-      vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: Object+ tab is active; opening panel.");
-      OpenIfSelected();
-    }
+    // Always open O+ panel when objects are selected, regardless of which Properties tab is active
+    vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: opening panel (objects selected).");
+    OpenIfSelected();
   }
 
   private void OnDeselectAll(object? sender, RhinoDeselectAllObjectsEventArgs e)
