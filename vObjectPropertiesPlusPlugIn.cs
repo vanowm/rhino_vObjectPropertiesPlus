@@ -44,7 +44,7 @@ public class vObjectPropertiesPlusPlugIn : PlugIn
     DebugLog($"OnLoad: registering panel GUID={panelGuid}");
     try
     {
-      Panels.RegisterPanel(this, typeof(Views.vObjectPropertiesPlusPanel), "Object+", LoadPanelIcon(), PanelType.PerDoc);
+      Panels.RegisterPanel(this, typeof(Views.vObjectPropertiesPlusPanel), "Properties+", LoadPanelIcon(), PanelType.PerDoc);
       DebugLog("OnLoad: RegisterPanel succeeded with PanelType.PerDoc");
     }
     catch (Exception ex)

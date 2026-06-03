@@ -1479,7 +1479,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       return;
 
     _lastUserEditMs = System.Environment.TickCount64;
-    uint undoRecord = _doc.BeginUndoRecord("Object+ Attributes");
+    uint undoRecord = _doc.BeginUndoRecord("Properties+ Attributes");
     bool changed = false;
     try
     {
@@ -2296,7 +2296,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     if (targetHeight.HasValue && targetHeight.Value <= minLen)
       return true;
 
-    uint undoRecord = _doc.BeginUndoRecord("Object+ Rectangle Width/Height");
+    uint undoRecord = _doc.BeginUndoRecord("Properties+ Rectangle Width/Height");
     bool changed = false;
     try
     {
@@ -2413,7 +2413,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     if (radius <= RhinoMath.ZeroTolerance)
       return;
 
-    uint undoRecord = _doc.BeginUndoRecord("Object+ Radius/Diameter");
+    uint undoRecord = _doc.BeginUndoRecord("Properties+ Radius/Diameter");
     bool changed = false;
     try
     {
@@ -2499,7 +2499,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     if (!IsEllipseOnlySelection(out var ellipses))
       return;
 
-    uint undoRecord = _doc.BeginUndoRecord("Object+ Ellipse Axis");
+    uint undoRecord = _doc.BeginUndoRecord("Properties+ Ellipse Axis");
     bool changed = false;
     try
     {
@@ -2558,7 +2558,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     if (!IsPolygonOnlySelection(out var polygons))
       return;
 
-    uint undoRecord = _doc.BeginUndoRecord("Object+ Polygon Sides");
+    uint undoRecord = _doc.BeginUndoRecord("Properties+ Polygon Sides");
     bool changed = false;
     try
     {
@@ -2590,7 +2590,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     if (!IsPolygonOnlySelection(out var polygons))
       return;
 
-    uint undoRecord = _doc.BeginUndoRecord("Object+ Polygon Radius");
+    uint undoRecord = _doc.BeginUndoRecord("Properties+ Polygon Radius");
     bool changed = false;
     try
     {
@@ -2786,7 +2786,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     if (targetLength <= RhinoMath.ZeroTolerance)
       return;
 
-    uint undoRecord = _doc.BeginUndoRecord("Object+ Length");
+    uint undoRecord = _doc.BeginUndoRecord("Properties+ Length");
     bool changed = false;
     try
     {
@@ -2976,30 +2976,30 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
   /// <summary>
   /// Centralized method to enable/disable controls with consistent styling.
-  /// TextBox/TextArea: Uses ReadOnly to prevent editing while maintaining appearance.
-  /// Other controls: Sets Enabled only (framework handles visual appearance).
+  /// All controls: Sets Enabled property (framework handles visual appearance).
+  /// TextBox (display-only with transparent background): Always stays ReadOnly=true.
   /// </summary>
   private static void SetControlEnabled(Control control, bool enabled)
   {
     switch (control)
     {
       case TextBox tb:
-        tb.ReadOnly = !enabled;
-        if (enabled)
+        // Display-only boxes (transparent background) stay ReadOnly=true always
+        if (tb.BackgroundColor == Colors.Transparent)
         {
-          // Only reset background if it's not transparent (info display boxes)
-          if (tb.BackgroundColor != Colors.Transparent)
-            tb.BackgroundColor = SystemColors.WindowBackground;
+          // Keep ReadOnly=true, just set Enabled for visual state
+          tb.Enabled = enabled;
         }
         else
         {
-          // Gray background for disabled editable boxes (skip transparent info displays)
-          if (tb.BackgroundColor != Colors.Transparent)
-            tb.BackgroundColor = SystemColors.Control;
+          // Editable boxes: use ReadOnly for functional state, Enabled for visual state
+          tb.ReadOnly = !enabled;
+          tb.Enabled = enabled;
         }
         break;
       case TextArea ta:
         ta.ReadOnly = !enabled;
+        ta.Enabled = enabled;
         break;
       default:
         control.Enabled = enabled;
@@ -4424,7 +4424,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private void ApplyToTextObjects(Action<TextEntity> apply)
   {
     if (_doc == null) return;
-    uint undoRecord = _doc.BeginUndoRecord("Object+ Text");
+    uint undoRecord = _doc.BeginUndoRecord("Properties+ Text");
     bool changed = false;
     try
     {

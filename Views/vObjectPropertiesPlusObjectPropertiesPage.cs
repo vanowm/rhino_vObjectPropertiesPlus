@@ -14,7 +14,7 @@ internal sealed class vObjectPropertiesPlusObjectPropertiesPage : ObjectProperti
   private vObjectPropertiesPlusPanel? _panel;
   private static Icon? _icon;
 
-  public override string EnglishPageTitle => "Object+";
+  public override string EnglishPageTitle => "Properties+";
 
   public override string PageIconEmbeddedResourceString => "vObjectPropertiesPlus.png";
 
