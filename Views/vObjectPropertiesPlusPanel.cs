@@ -424,6 +424,20 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private void RefreshFromDoc(RhinoDoc doc)
   {
     var selected = doc.Objects.GetSelectedObjects(false, false).ToList();
+    
+    // If no normal selection, check for objects with grips on (potential subobject selection)
+    if (selected.Count == 0)
+    {
+      var allObjects = doc.Objects.GetObjectList(ObjectType.AnyObject);
+      foreach (var obj in allObjects)
+      {
+        if (obj != null && obj.GripsOn)
+        {
+          selected.Add(obj);
+        }
+      }
+    }
+    
     Application.Instance.AsyncInvoke(() => UpdateFromSelection(doc, selected));
   }
 
@@ -1450,12 +1464,14 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       if (obj.Geometry is not Curve curve)
         continue;
 
+      // Check if this object has grips on (indicates potential segment/subobject interaction)
+      if (obj.GripsOn)
+      {
+        hasSegmentSelection = true;
+      }
+
       curves.Add(curve);
     }
-
-    // For now, segment selection detection is disabled
-    // TODO: Implement proper sub-object selection detection using Rhino's selection APIs
-    // This would require tracking ComponentIndex information from the selection events
 
     return curves;
   }
