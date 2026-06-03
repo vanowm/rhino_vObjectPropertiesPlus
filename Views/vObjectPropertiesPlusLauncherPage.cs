@@ -21,6 +21,7 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
   private RhinoDoc? _pendingCloseDoc;
   private bool _closeCheckScheduled;
   private DateTime _lastSelectionTime = DateTime.MinValue;
+  private bool _shouldBeVisible = false; // Tracks whether O+ should be visible based on tab state
 
   public vObjectPropertiesPlusLauncherPage()
   {
@@ -41,7 +42,8 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
   {
     if (active)
     {
-      vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: OnActivate(true) - Object+ tab active, showing panel if objects selected.");
+      vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: OnActivate(true) - Object+ tab active, enabling O+ visibility.");
+      _shouldBeVisible = true;
       CancelScheduledClose();
       OpenIfSelected();
     }
@@ -55,12 +57,14 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
       
       if (!isLikelyAutoSwitch)
       {
-        vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: hiding O+ (manual tab click to unsupported tab).");
+        vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: manual tab click to unsupported tab - disabling O+ visibility and hiding.");
+        _shouldBeVisible = false;
         HidePanel();
       }
       else
       {
         vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: keeping O+ visible (Rhino auto-switched tab after selection).");
+        // Keep _shouldBeVisible as true so O+ stays visible during auto-switches
       }
     }
     
@@ -132,15 +136,25 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
   private void OnSelect(object? sender, RhinoObjectSelectionEventArgs e)
   {
     _lastSelectionTime = DateTime.Now;
-    vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: OnSelect event - recording selection time and opening panel.");
+    vObjectPropertiesPlusPlugIn.DebugLog($"LauncherPage: OnSelect event - shouldBeVisible={_shouldBeVisible}");
     CancelScheduledClose();
-    OpenIfSelected();
+    
+    if (_shouldBeVisible)
+    {
+      vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: opening panel (objects selected and O+ tab state allows visibility).");
+      OpenIfSelected();
+    }
+    else
+    {
+      vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: NOT opening panel (on unsupported tab).");
+    }
   }
 
   private void OnDeselectAll(object? sender, RhinoDeselectAllObjectsEventArgs e)
   {
-    vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: OnDeselectAll event.");
-    _lastSelectionTime = DateTime.MinValue; // Reset so next tab switch will hide O+
+    vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: OnDeselectAll event - resetting visibility state.");
+    _lastSelectionTime = DateTime.MinValue;
+    _shouldBeVisible = false; // Reset state when nothing selected
     ScheduleCloseIfNothingSelected(e.Document);
   }
 
