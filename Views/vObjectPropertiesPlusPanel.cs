@@ -2980,10 +2980,9 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
   /// <summary>
   /// Centralized method to enable/disable controls with consistent styling.
-  /// TextBox (editable): Use ReadOnly only - keeps proper visual state.
-  /// TextBox (display-only with transparent background): Keep ReadOnly=true, set Enabled for graying.
-  /// DropDown/NumericStepper: Set Enabled + BackgroundColor to prevent black borders.
-  /// Other controls: Set Enabled only.
+  /// TextBox (editable): Use ReadOnly property to toggle edit state while maintaining visual consistency.
+  /// TextBox (display-only with transparent background): Keep ReadOnly=true, use Enabled for graying.
+  /// Other controls: Use Enabled property (framework handles visual state).
   /// </summary>
   private static void SetControlEnabled(Control control, bool enabled)
   {
@@ -2998,26 +2997,12 @@ public sealed class vObjectPropertiesPlusPanel : Panel
         }
         else
         {
-          // Editable boxes: ONLY use ReadOnly property (don't touch Enabled)
+          // Editable boxes: use ReadOnly property to control edit state
           tb.ReadOnly = !enabled;
         }
         break;
       case TextArea ta:
         ta.ReadOnly = !enabled;
-        break;
-      case DropDown dd:
-        dd.Enabled = enabled;
-        if (enabled)
-          dd.BackgroundColor = SystemColors.WindowBackground;
-        else
-          dd.BackgroundColor = SystemColors.Control;
-        break;
-      case NumericStepper ns:
-        ns.Enabled = enabled;
-        if (enabled)
-          ns.BackgroundColor = SystemColors.WindowBackground;
-        else
-          ns.BackgroundColor = SystemColors.Control;
         break;
       default:
         control.Enabled = enabled;
@@ -4210,10 +4195,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
   private static TextBox NewValueBox()
   {
-    return new TextBox
-    {
-      ReadOnly = true
-    };
+    return new TextBox();
   }
 
   private static Label NewValueLabel()
