@@ -529,12 +529,27 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       SetControlEnabled(_showIsocurveCheck, false);
       
       // Enable curve-specific controls
+      _totalLengthNameLabel.Text = "Total length";
+      _curveMetricLabel.Text = "Length";
+      _radiusNameLabel.Text = "Radius";
+      _diameterNameLabel.Text = "Diameter";
+      _curveMetricLabel.Visible = true;
+      _curveMetricBox.Visible = true;
+      _curveMetricUnitDrop.Visible = true;
+      _radiusNameLabel.Visible = true;
+      _radiusBox.Visible = true;
+      _radiusUnitDrop.Visible = true;
+      _diameterNameLabel.Visible = true;
+      _diameterBox.Visible = true;
+      _diameterUnitDrop.Visible = true;
       SetControlEnabled(_totalLengthBox, true);
       SetControlEnabled(_curveMetricBox, true);
       SetControlEnabled(_curveMetricUnitDrop, true);
       SetControlEnabled(_radiusBox, true);
       SetControlEnabled(_diameterBox, true);
       SetControlEnabled(_totalLengthUnitDrop, true);
+      SetControlEnabled(_radiusUnitDrop, true);
+      SetControlEnabled(_diameterUnitDrop, true);
       
       // Compute curve metrics for the segment(s)
       // If a specific segment is focused, show only that segment's metrics
@@ -574,12 +589,14 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       
       // Get current unit systems from dropdowns
       UnitSystem totalLengthUnits = GetSelectedUnitSystem(_totalLengthUnitDrop, _doc);
+      UnitSystem curveMetricUnits = GetSelectedUnitSystem(_curveMetricUnitDrop, _doc);
       UnitSystem radiusUnits = GetSelectedUnitSystem(_radiusUnitDrop, _doc);
       
       // Update curve fields
       _totalLengthBox.Text = FormatInfoNumber(ConvertLength(totalLength, modelUnits, totalLengthUnits), _totalLengthUnitDrop);
+      SetEditableTextValue(_curveMetricBox, FormatInfoNumber(ConvertLength(totalLength, modelUnits, curveMetricUnits), _curveMetricUnitDrop));
       
-      vObjectPropertiesPlusPlugIn.DebugLog($"RefreshForSegmentSelection: _totalLengthBox.Text={_totalLengthBox.Text}");
+      vObjectPropertiesPlusPlugIn.DebugLog($"RefreshForSegmentSelection: _totalLengthBox.Text={_totalLengthBox.Text}, _curveMetricBox.Text={_curveMetricBox.Text}");
       
       if (radii.Count > 0)
       {
@@ -603,6 +620,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
   public void UpdateFromSelection(RhinoDoc? doc, IEnumerable<RhinoObject> objects)
   {
+    vObjectPropertiesPlusPlugIn.DebugLog($"UpdateFromSelection: called, _focusedSegmentIndex={_focusedSegmentIndex}, _focusedObjectId={_focusedObjectId}");
     _doc = doc;
     EnsureDocUnitPrefsLoaded(doc);
 
@@ -901,6 +919,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _totalLengthBox.Text = curveCount == 0
       ? "-"
       : FormatInfoNumber(ConvertLength(totalCurveLength, modelUnits, totalLengthUnits), _totalLengthUnitDrop);
+    vObjectPropertiesPlusPlugIn.DebugLog($"UpdateFromSelection: Set _totalLengthBox.Text={_totalLengthBox.Text}");
 
     bool hasCircle = circleCount > 0;
     bool hasArc = arcCount > 0;
@@ -1140,6 +1159,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     SetControlEnabled(_showIsocurveCheck, false);
 
     _totalLengthBox.Text = "-";
+    vObjectPropertiesPlusPlugIn.DebugLog("SetEmptyState: Set _totalLengthBox.Text=-");
     SetControlEnabled(_totalLengthBox, false);
     _totalLengthNameLabel.Text = "Total length";
     _curveMetricLabel.Text = "Length";
