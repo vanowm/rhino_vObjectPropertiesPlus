@@ -426,21 +426,25 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     var selected = doc.Objects.GetSelectedObjects(false, false).ToList();
     vObjectPropertiesPlusPlugIn.DebugLog($"RefreshFromDoc: GetSelectedObjects returned {selected.Count} objects");
     
-    // If no normal selection, check for objects with grips on (potential subobject selection)
+    // If no normal selection, check for objects with selected subobjects (segments)
     if (selected.Count == 0)
     {
       var allObjects = doc.Objects.GetObjectList(ObjectType.AnyObject);
-      int gripsOnCount = 0;
+      int subObjCount = 0;
       foreach (var obj in allObjects)
       {
-        if (obj != null && obj.GripsOn)
+        if (obj == null) continue;
+        
+        // Check if object has any selected components/subobjects
+        var subObjects = obj.GetSelectedSubObjects();
+        if (subObjects != null && subObjects.Length > 0)
         {
-          gripsOnCount++;
+          subObjCount++;
           selected.Add(obj);
-          vObjectPropertiesPlusPlugIn.DebugLog($"RefreshFromDoc: Found object with GripsOn: {obj.Id}");
+          vObjectPropertiesPlusPlugIn.DebugLog($"RefreshFromDoc: Found object with {subObjects.Length} selected subobjects: {obj.Id}");
         }
       }
-      vObjectPropertiesPlusPlugIn.DebugLog($"RefreshFromDoc: Checked all objects, found {gripsOnCount} with GripsOn");
+      vObjectPropertiesPlusPlugIn.DebugLog($"RefreshFromDoc: Checked all objects, found {subObjCount} with selected subobjects");
     }
     
     vObjectPropertiesPlusPlugIn.DebugLog($"RefreshFromDoc: Final selection count = {selected.Count}");
@@ -1470,10 +1474,12 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       if (obj.Geometry is not Curve curve)
         continue;
 
-      // Check if this object has grips on (indicates potential segment/subobject interaction)
-      if (obj.GripsOn)
+      // Check if this object has selected subobjects (segments)
+      var selectedSubObjects = obj.GetSelectedSubObjects();
+      if (selectedSubObjects != null && selectedSubObjects.Length > 0)
       {
         hasSegmentSelection = true;
+        vObjectPropertiesPlusPlugIn.DebugLog($"GetInfoCurvesForSelection: Object {obj.Id} has {selectedSubObjects.Length} selected subobjects");
       }
 
       curves.Add(curve);
