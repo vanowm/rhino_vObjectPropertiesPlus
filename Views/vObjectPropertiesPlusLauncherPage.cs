@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Rhino;
 using Rhino.DocObjects;
@@ -11,6 +12,9 @@ namespace vObjectPropertiesPlus.Views;
 [SupportedOSPlatform("windows")]
 internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
 {
+  [DllImport("user32.dll")]
+  private static extern IntPtr GetForegroundWindow();
+
   private static readonly Guid PanelGuid = typeof(vObjectPropertiesPlusPanel).GUID;
 
   private readonly Eto.Forms.Panel _control = new Eto.Forms.Panel
@@ -21,7 +25,7 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
   private RhinoDoc? _pendingCloseDoc;
   private bool _closeCheckScheduled;
   private DateTime _lastSelectionTime = DateTime.MinValue;
-  private bool _shouldBeVisible = false; // Tracks whether O+ should be visible based on tab state
+  private bool _shouldBeVisible = true; // Start true since panel opens on startup
 
   public vObjectPropertiesPlusLauncherPage()
   {
@@ -49,6 +53,15 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
     }
     else
     {
+      bool rhinoHasFocus = RhinoHasFocus();
+      
+      // Don't hide when Rhino loses focus - only hide on actual tab switches
+      if (!rhinoHasFocus)
+      {
+        vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: OnActivate(false) but Rhino lost focus - keeping O+ visible.");
+        return base.OnActivate(active);
+      }
+      
       // Distinguish between manual tab clicks and Rhino auto-switching tabs
       var timeSinceSelection = DateTime.Now - _lastSelectionTime;
       bool isLikelyAutoSwitch = timeSinceSelection.TotalMilliseconds < 500;
@@ -73,6 +86,20 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
 
   private static bool HasSelectedObjects()
     => RhinoDoc.ActiveDoc?.Objects.GetSelectedObjects(false, false).Any() == true;
+
+  private static bool RhinoHasFocus()
+  {
+    try
+    {
+      var foreground = GetForegroundWindow();
+      var rhinoHandle = Process.GetCurrentProcess().MainWindowHandle;
+      return foreground == rhinoHandle;
+    }
+    catch
+    {
+      return true; // Default to true if can't determine
+    }
+  }
 
   private static void ShowPanel()
   {
@@ -104,7 +131,12 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
     {
       bool isFloating = Panels.PanelDockBar(PanelGuid) == Guid.Empty;
       bool isVisible = Panels.IsPanelVisible(PanelGuid);
-      vObjectPropertiesPlusPlugIn.DebugLog($"LauncherPage: HidePanel called. Floating={isFloating}, Visible={isVisible}");
+      
+      // Log stack trace to understand what's triggering the hide
+      var stackTrace = new System.Diagnostics.StackTrace(1, true);
+      var callerFrame = stackTrace.GetFrame(0);
+      string caller = callerFrame?.GetMethod()?.Name ?? "unknown";
+      vObjectPropertiesPlusPlugIn.DebugLog($"LauncherPage: HidePanel called by {caller}. Floating={isFloating}, Visible={isVisible}");
 
       if (isFloating)
       {
