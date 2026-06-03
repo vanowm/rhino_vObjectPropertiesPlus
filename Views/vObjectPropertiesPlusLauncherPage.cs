@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text;
@@ -24,7 +25,6 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
     Content = new Eto.Forms.Label { Text = "↗ Object+ Panel" }
   };
 
-  private IntPtr _propertiesParentHandle;
   private IntPtr _propertiesTabHandle;
   private string? _lastObservedTabTitle;
   private bool _tabMonitorAttached;
@@ -46,13 +46,6 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
 
   public override bool ShouldDisplay(ObjectPropertiesPageEventArgs e) => true;
 
-  public override void OnCreateParent(IntPtr hwndParent)
-  {
-    base.OnCreateParent(hwndParent);
-    _propertiesParentHandle = hwndParent;
-    EnsureTabMonitorHooked();
-  }
-
   public override bool OnActivate(bool active)
   {
     if (active)
@@ -63,26 +56,10 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
     return base.OnActivate(active);
   }
 
-  // Rhino hosts the Properties pages in native tab controls, not WinForms controls,
-  // so poll the native tab strip from idle once we know the page parent handle.
+  // Rhino hosts the Properties pages in native tab controls. Scan the current Rhino
+  // process for the tab strip that contains the Object+ tab and monitor it from idle.
   private void EnsureTabMonitorHooked()
   {
-    if (_propertiesParentHandle == IntPtr.Zero)
-      return;
-
-    if (_propertiesTabHandle == IntPtr.Zero || !IsWindow(_propertiesTabHandle))
-    {
-      _propertiesTabHandle = FindPropertiesTabHandle(_propertiesParentHandle);
-      if (_propertiesTabHandle == IntPtr.Zero)
-      {
-        vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: native Properties tab handle not found.");
-        return;
-      }
-
-      _lastObservedTabTitle = GetSelectedTabTitle(_propertiesTabHandle);
-      vObjectPropertiesPlusPlugIn.DebugLog($"LauncherPage: hooked native tab handle, selected tab='{_lastObservedTabTitle ?? "<null>"}'.");
-    }
-
     if (_tabMonitorAttached)
       return;
 
@@ -94,10 +71,12 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
   {
     if (_propertiesTabHandle == IntPtr.Zero || !IsWindow(_propertiesTabHandle))
     {
-      _propertiesTabHandle = IntPtr.Zero;
+      _propertiesTabHandle = FindPropertiesTabHandleForCurrentProcess();
+      if (_propertiesTabHandle == IntPtr.Zero)
+        return;
+
       _lastObservedTabTitle = null;
-      EnsureTabMonitorHooked();
-      return;
+      vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: hooked native Properties tab handle.");
     }
 
     string? title = GetSelectedTabTitle(_propertiesTabHandle);
@@ -117,16 +96,34 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
       HidePanel();
   }
 
-  private static IntPtr FindPropertiesTabHandle(IntPtr parentHandle)
+  private static IntPtr FindPropertiesTabHandleForCurrentProcess()
   {
     IntPtr found = IntPtr.Zero;
-    EnumChildWindows(parentHandle, (childHandle, _) =>
+    int currentPid = Process.GetCurrentProcess().Id;
+    EnumWindows((topHandle, _) =>
     {
-      if (!IsTabControlWindow(childHandle)) return true;
-      if (!TabContainsTitle(childHandle, "Object+")) return true;
-      found = childHandle;
-      return false;
+      uint windowPid;
+      GetWindowThreadProcessId(topHandle, out windowPid);
+      if (windowPid != currentPid)
+        return true;
+
+      if (IsTabControlWindow(topHandle) && TabContainsTitle(topHandle, "Object+"))
+      {
+        found = topHandle;
+        return false;
+      }
+
+      EnumChildWindows(topHandle, (childHandle, _) =>
+      {
+        if (!IsTabControlWindow(childHandle)) return true;
+        if (!TabContainsTitle(childHandle, "Object+")) return true;
+        found = childHandle;
+        return false;
+      }, IntPtr.Zero);
+
+      return found == IntPtr.Zero;
     }, IntPtr.Zero);
+
     return found;
   }
 
@@ -229,7 +226,11 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
   }
 
   private void OnSelect(object? sender, RhinoObjectSelectionEventArgs e)
-    => CancelScheduledClose();
+  {
+    CancelScheduledClose();
+    if (_lastObservedTabTitle != null && SafeTabs.Contains(_lastObservedTabTitle))
+      OpenIfSelected();
+  }
 
   private void OnDeselectAll(object? sender, RhinoDeselectAllObjectsEventArgs e)
     => ScheduleCloseIfNothingSelected(e.Document);
@@ -265,6 +266,7 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
   private static void CloseIfNothingSelected(RhinoDoc? doc)
   {
     if (doc == null || doc.Objects.GetSelectedObjects(false, false).Any()) return;
+    if (!IsRhinoForeground()) return;
     HidePanel();
   }
 
@@ -290,10 +292,20 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
 
   [DllImport("user32.dll")]
   [return: MarshalAs(UnmanagedType.Bool)]
+  private static extern bool EnumWindows(EnumChildProc callback, IntPtr lParam);
+
+  [DllImport("user32.dll")]
+  [return: MarshalAs(UnmanagedType.Bool)]
   private static extern bool EnumChildWindows(IntPtr parentHandle, EnumChildProc callback, IntPtr lParam);
 
   [DllImport("user32.dll", CharSet = CharSet.Unicode)]
   private static extern int GetClassName(IntPtr handle, StringBuilder className, int maxCount);
+
+  [DllImport("user32.dll")]
+  private static extern IntPtr GetForegroundWindow();
+
+  [DllImport("user32.dll")]
+  private static extern uint GetWindowThreadProcessId(IntPtr handle, out uint processId);
 
   [DllImport("user32.dll")]
   [return: MarshalAs(UnmanagedType.Bool)]
@@ -304,5 +316,16 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
 
   [DllImport("user32.dll", EntryPoint = "SendMessageW", CharSet = CharSet.Unicode)]
   private static extern IntPtr SendMessage(IntPtr handle, int msg, IntPtr wParam, ref TCITEM item);
+
+  private static bool IsRhinoForeground()
+  {
+    IntPtr foreground = GetForegroundWindow();
+    if (foreground == IntPtr.Zero)
+      return false;
+
+    uint foregroundPid;
+    GetWindowThreadProcessId(foreground, out foregroundPid);
+    return foregroundPid == Process.GetCurrentProcess().Id;
+  }
 }
 
