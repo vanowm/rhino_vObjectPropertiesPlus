@@ -18,10 +18,8 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
     Content = new Eto.Forms.Label { Text = "↗ Object+ Panel" }
   };
 
-  private bool _isObjectPlusTabActive;
   private RhinoDoc? _pendingCloseDoc;
   private bool _closeCheckScheduled;
-  private DateTime _lastSelectionChangeTime = DateTime.MinValue;
 
   public vObjectPropertiesPlusLauncherPage()
   {
@@ -40,8 +38,6 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
 
   public override bool OnActivate(bool active)
   {
-    _isObjectPlusTabActive = active;
-    
     if (active)
     {
       vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: OnActivate(true) - Object+ tab active, showing panel if objects selected.");
@@ -50,22 +46,7 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
     }
     else
     {
-      // If deactivation happens shortly after a selection change, it's likely Rhino auto-switching tabs
-      // (e.g., selecting text causes Rhino to switch to Text tab). Keep O+ visible in that case.
-      var timeSinceSelection = DateTime.Now - _lastSelectionChangeTime;
-      bool isAutoSwitch = timeSinceSelection.TotalMilliseconds < 500;
-      
-      vObjectPropertiesPlusPlugIn.DebugLog($"LauncherPage: OnActivate(false) - time since last selection: {timeSinceSelection.TotalMilliseconds:F0}ms, auto-switch={isAutoSwitch}");
-      
-      if (isAutoSwitch)
-      {
-        vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: keeping O+ visible (likely auto-tab-switch from selection change).");
-      }
-      else
-      {
-        vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: hiding O+ (user manually clicked another tab).");
-        HidePanel();
-      }
+      vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: OnActivate(false) - Object+ tab deactivated (panel visibility controlled by selection only).");
     }
     
     return base.OnActivate(active);
@@ -135,11 +116,10 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
 
   private void OnSelect(object? sender, RhinoObjectSelectionEventArgs e)
   {
-    _lastSelectionChangeTime = DateTime.Now;
-    vObjectPropertiesPlusPlugIn.DebugLog($"LauncherPage: OnSelect event. Object+ tab active={_isObjectPlusTabActive}");
+    vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: OnSelect event.");
     CancelScheduledClose();
     
-    // Always open O+ panel when objects are selected, regardless of which Properties tab is active
+    // Always open O+ panel when objects are selected
     vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: opening panel (objects selected).");
     OpenIfSelected();
   }
@@ -196,34 +176,8 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
       return;
     }
 
-    bool isRhinoForeground = IsRhinoForeground();
-    vObjectPropertiesPlusPlugIn.DebugLog($"LauncherPage: nothing selected. Rhino foreground={isRhinoForeground}");
-    
-    if (!isRhinoForeground)
-    {
-      vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: not hiding because Rhino is not in foreground.");
-      return;
-    }
-
-    vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: hiding panel (nothing selected, Rhino in foreground).");
+    vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: hiding panel (nothing selected).");
     HidePanel();
   }
-
-  private static bool IsRhinoForeground()
-  {
-    IntPtr foreground = GetForegroundWindow();
-    if (foreground == IntPtr.Zero)
-      return false;
-
-    uint foregroundPid;
-    GetWindowThreadProcessId(foreground, out foregroundPid);
-    return foregroundPid == Process.GetCurrentProcess().Id;
-  }
-
-  [System.Runtime.InteropServices.DllImport("user32.dll")]
-  private static extern IntPtr GetForegroundWindow();
-
-  [System.Runtime.InteropServices.DllImport("user32.dll")]
-  private static extern uint GetWindowThreadProcessId(IntPtr handle, out uint processId);
 }
 
