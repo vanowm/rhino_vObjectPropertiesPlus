@@ -54,11 +54,6 @@ public class vObjectPropertiesPlusPlugIn : PlugIn
     return LoadReturnCode.Success;
   }
 
-  protected override void ObjectPropertiesPages(ObjectPropertiesPageCollection collection)
-  {
-    collection.Add(new Views.vObjectPropertiesPlusLauncherPage());
-  }
-
   internal static System.Drawing.Icon LoadPanelIcon()
   {
     if (_cachedPanelIcon != null)

@@ -387,7 +387,6 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       HorizontalContentAlignment = HorizontalAlignment.Stretch,
       Items =
       {
-        NewSectionLabel("Object"),
         objectTable,
         _infoPlusSection,
         _textSection,
