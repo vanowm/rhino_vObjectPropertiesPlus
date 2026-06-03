@@ -13,6 +13,7 @@
     <InformationalVersion>26.6.3.1525</InformationalVersion>
     <AssemblyVersion>26.6.3.1525</AssemblyVersion>
     <FileVersion>26.6.3.1525</FileVersion>
+    <ApplicationIcon>vObjectPropertiesPlus.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
