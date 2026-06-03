@@ -50,8 +50,13 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
   {
     if (active)
     {
+      vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: OnActivate(true) - attaching tab monitor and showing panel.");
       EnsureTabMonitorHooked();
       ShowPanel();
+    }
+    else
+    {
+      vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: OnActivate(false)");
     }
     return base.OnActivate(active);
   }
@@ -73,10 +78,14 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
     {
       _propertiesTabHandle = FindPropertiesTabHandleForCurrentProcess();
       if (_propertiesTabHandle == IntPtr.Zero)
+      {
+        vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: Properties tab handle not found in this idle cycle.");
         return;
+      }
 
       _lastObservedTabTitle = null;
-      vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: hooked native Properties tab handle.");
+      var allTabs = GetAllTabTitles(_propertiesTabHandle);
+      vObjectPropertiesPlusPlugIn.DebugLog($"LauncherPage: hooked native Properties tab handle. Tabs present: {string.Join(", ", allTabs)}");
     }
 
     string? title = GetSelectedTabTitle(_propertiesTabHandle);
@@ -84,24 +93,32 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
       return;
 
     _lastObservedTabTitle = title;
-    vObjectPropertiesPlusPlugIn.DebugLog($"LauncherPage: selected tab changed to '{title ?? "<null>"}'.");
+    bool isSafe = title != null && SafeTabs.Contains(title);
+    vObjectPropertiesPlusPlugIn.DebugLog($"LauncherPage: selected tab changed to '{title ?? "<null>"}'. Safe={isSafe}");
 
-    if (title != null && SafeTabs.Contains(title))
+    if (isSafe)
     {
       OpenIfSelected();
       return;
     }
 
     if (!string.IsNullOrWhiteSpace(title))
+    {
+      vObjectPropertiesPlusPlugIn.DebugLog($"LauncherPage: hiding panel due to unsafe tab '{title}'.");
       HidePanel();
+    }
   }
 
   private static IntPtr FindPropertiesTabHandleForCurrentProcess()
   {
     IntPtr found = IntPtr.Zero;
     int currentPid = Process.GetCurrentProcess().Id;
+    int topWindowsScanned = 0;
+    int childWindowsScanned = 0;
+    
     EnumWindows((topHandle, _) =>
     {
+      topWindowsScanned++;
       uint windowPid;
       GetWindowThreadProcessId(topHandle, out windowPid);
       if (windowPid != currentPid)
@@ -110,19 +127,25 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
       if (IsTabControlWindow(topHandle) && TabContainsTitle(topHandle, "Object+"))
       {
         found = topHandle;
+        vObjectPropertiesPlusPlugIn.DebugLog($"LauncherPage: tab handle found in top window (scanned {topWindowsScanned} top-level, {childWindowsScanned} child).");
         return false;
       }
 
       EnumChildWindows(topHandle, (childHandle, _) =>
       {
+        childWindowsScanned++;
         if (!IsTabControlWindow(childHandle)) return true;
         if (!TabContainsTitle(childHandle, "Object+")) return true;
         found = childHandle;
+        vObjectPropertiesPlusPlugIn.DebugLog($"LauncherPage: tab handle found in child window (scanned {topWindowsScanned} top-level, {childWindowsScanned} child).");
         return false;
       }, IntPtr.Zero);
 
       return found == IntPtr.Zero;
     }, IntPtr.Zero);
+
+    if (found == IntPtr.Zero)
+      vObjectPropertiesPlusPlugIn.DebugLog($"LauncherPage: no Properties tab found (scanned {topWindowsScanned} top-level, {childWindowsScanned} child windows).");
 
     return found;
   }
@@ -156,6 +179,19 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
       return null;
 
     return GetTabText(tabHandle, index)?.Trim();
+  }
+
+  private static List<string> GetAllTabTitles(IntPtr tabHandle)
+  {
+    var titles = new List<string>();
+    int count = GetTabCount(tabHandle);
+    for (int i = 0; i < count; i++)
+    {
+      var title = GetTabText(tabHandle, i)?.Trim();
+      if (title != null)
+        titles.Add(title);
+    }
+    return titles;
   }
 
   private static string? GetTabText(IntPtr tabHandle, int index)
@@ -193,50 +229,87 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
   {
     try
     {
-      if (!Panels.IsPanelVisible(PanelGuid) && Panels.PanelDockBar(PanelGuid) == Guid.Empty)
+      bool isFloating = Panels.PanelDockBar(PanelGuid) == Guid.Empty;
+      bool isVisible = Panels.IsPanelVisible(PanelGuid);
+      vObjectPropertiesPlusPlugIn.DebugLog($"LauncherPage: ShowPanel called. Floating={isFloating}, Visible={isVisible}");
+
+      if (!isVisible && isFloating)
       {
         Panels.FloatPanel(PanelGuid, Panels.FloatPanelMode.Show);
+        vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: opened floating panel.");
         return;
       }
 
       Panels.OpenPanel(PanelGuid);
+      vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: opened docked panel.");
     }
-    catch { }
+    catch (Exception ex)
+    {
+      vObjectPropertiesPlusPlugIn.DebugLog($"LauncherPage: ShowPanel exception: {ex.Message}");
+    }
   }
 
   private static void HidePanel()
   {
     try
     {
-      if (Panels.PanelDockBar(PanelGuid) == Guid.Empty)
+      bool isFloating = Panels.PanelDockBar(PanelGuid) == Guid.Empty;
+      bool isVisible = Panels.IsPanelVisible(PanelGuid);
+      vObjectPropertiesPlusPlugIn.DebugLog($"LauncherPage: HidePanel called. Floating={isFloating}, Visible={isVisible}");
+
+      if (isFloating)
       {
         Panels.FloatPanel(PanelGuid, Panels.FloatPanelMode.Hide);
+        vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: hid floating panel.");
         return;
       }
 
       Panels.ClosePanel(PanelGuid);
+      vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: closed docked panel.");
     }
-    catch { }
+    catch (Exception ex)
+    {
+      vObjectPropertiesPlusPlugIn.DebugLog($"LauncherPage: HidePanel exception: {ex.Message}");
+    }
   }
 
   private static void OpenIfSelected()
   {
-    if (!HasSelectedObjects()) return;
+    if (!HasSelectedObjects())
+    {
+      vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: not opening panel (nothing selected).");
+      return;
+    }
+    vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: opening panel (objects selected).");
     ShowPanel();
   }
 
   private void OnSelect(object? sender, RhinoObjectSelectionEventArgs e)
   {
+    vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: OnSelect event.");
     CancelScheduledClose();
     if (_lastObservedTabTitle != null && SafeTabs.Contains(_lastObservedTabTitle))
+    {
+      vObjectPropertiesPlusPlugIn.DebugLog($"LauncherPage: current tab '{_lastObservedTabTitle}' is safe; opening if selected.");
       OpenIfSelected();
+    }
+    else
+    {
+      vObjectPropertiesPlusPlugIn.DebugLog($"LauncherPage: current tab '{_lastObservedTabTitle ?? "<unknown>"}' not safe; not opening.");
+    }
   }
 
   private void OnDeselectAll(object? sender, RhinoDeselectAllObjectsEventArgs e)
-    => ScheduleCloseIfNothingSelected(e.Document);
+  {
+    vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: OnDeselectAll event.");
+    ScheduleCloseIfNothingSelected(e.Document);
+  }
 
   private void OnDeselect(object? sender, RhinoObjectSelectionEventArgs e)
-    => ScheduleCloseIfNothingSelected(e.Document);
+  {
+    vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: OnDeselect event.");
+    ScheduleCloseIfNothingSelected(e.Document);
+  }
 
   private void ScheduleCloseIfNothingSelected(RhinoDoc? doc)
   {
@@ -265,8 +338,29 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
 
   private static void CloseIfNothingSelected(RhinoDoc? doc)
   {
-    if (doc == null || doc.Objects.GetSelectedObjects(false, false).Any()) return;
-    if (!IsRhinoForeground()) return;
+    if (doc == null)
+    {
+      vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: close check skipped (no doc).");
+      return;
+    }
+
+    var selected = doc.Objects.GetSelectedObjects(false, false).ToArray();
+    if (selected.Any())
+    {
+      vObjectPropertiesPlusPlugIn.DebugLog($"LauncherPage: close check skipped ({selected.Length} objects still selected).");
+      return;
+    }
+
+    bool isRhinoForeground = IsRhinoForeground();
+    vObjectPropertiesPlusPlugIn.DebugLog($"LauncherPage: nothing selected. Rhino foreground={isRhinoForeground}");
+    
+    if (!isRhinoForeground)
+    {
+      vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: not hiding because Rhino is not in foreground.");
+      return;
+    }
+
+    vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: hiding panel (nothing selected, Rhino in foreground).");
     HidePanel();
   }
 
