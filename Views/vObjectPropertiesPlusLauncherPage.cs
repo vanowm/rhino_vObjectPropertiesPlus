@@ -152,9 +152,9 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
 
   private void OnDeselectAll(object? sender, RhinoDeselectAllObjectsEventArgs e)
   {
-    vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: OnDeselectAll event - resetting visibility state.");
+    vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: OnDeselectAll event.");
     _lastSelectionTime = DateTime.MinValue;
-    _shouldBeVisible = false; // Reset state when nothing selected
+    // Don't reset _shouldBeVisible here - it should only be controlled by tab state (OnActivate)
     ScheduleCloseIfNothingSelected(e.Document);
   }
 

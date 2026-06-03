@@ -12,6 +12,7 @@ namespace vObjectPropertiesPlus;
 public class vObjectPropertiesPlusPlugIn : PlugIn
 {
   private static readonly object LogLock = new();
+  private static bool _isFirstLog = true;
 
   public override PlugInLoadTime LoadTime => PlugInLoadTime.AtStartup;
   protected override string LocalPlugInName => "vObjectProperties+";
@@ -117,7 +118,15 @@ public class vObjectPropertiesPlusPlugIn : PlugIn
       string line = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff") + " | " + message + System.Environment.NewLine;
       lock (LogLock)
       {
-        File.AppendAllText(logPath, line);
+        if (_isFirstLog)
+        {
+          File.WriteAllText(logPath, line); // Clear log on first write
+          _isFirstLog = false;
+        }
+        else
+        {
+          File.AppendAllText(logPath, line);
+        }
       }
     }
     catch
