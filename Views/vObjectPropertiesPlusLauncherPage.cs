@@ -1,8 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
-using System.Windows.Forms;
+using System.Text;
 using Rhino;
 using Rhino.DocObjects;
 using Rhino.UI;
@@ -23,15 +24,18 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
     Content = new Eto.Forms.Label { Text = "↗ Object+ Panel" }
   };
 
-  private TabControl? _propertiesTabControl;
+  private IntPtr _propertiesParentHandle;
+  private IntPtr _propertiesTabHandle;
+  private string? _lastObservedTabTitle;
+  private bool _tabMonitorAttached;
   private RhinoDoc? _pendingCloseDoc;
   private bool _closeCheckScheduled;
 
   public vObjectPropertiesPlusLauncherPage()
   {
+    RhinoDoc.SelectObjects      += OnSelect;
     RhinoDoc.DeselectAllObjects += OnDeselectAll;
     RhinoDoc.DeselectObjects    += OnDeselect;
-    _control.LoadComplete       += OnControlLoadComplete;
   }
 
   public override string EnglishPageTitle => "Object+";
@@ -45,105 +49,145 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
   public override void OnCreateParent(IntPtr hwndParent)
   {
     base.OnCreateParent(hwndParent);
-    EnsureTabControlHooked(hwndParent);
+    _propertiesParentHandle = hwndParent;
+    EnsureTabMonitorHooked();
   }
 
   public override bool OnActivate(bool active)
   {
     if (active)
     {
-      EnsureTabControlHooked(IntPtr.Zero);
+      EnsureTabMonitorHooked();
       ShowPanel();
     }
     return base.OnActivate(active);
   }
 
-  private void OnControlLoadComplete(object? sender, EventArgs e)
+  // Rhino hosts the Properties pages in native tab controls, not WinForms controls,
+  // so poll the native tab strip from idle once we know the page parent handle.
+  private void EnsureTabMonitorHooked()
   {
-    _control.LoadComplete -= OnControlLoadComplete;
-    EnsureTabControlHooked(IntPtr.Zero);
+    if (_propertiesParentHandle == IntPtr.Zero)
+      return;
+
+    if (_propertiesTabHandle == IntPtr.Zero || !IsWindow(_propertiesTabHandle))
+    {
+      _propertiesTabHandle = FindPropertiesTabHandle(_propertiesParentHandle);
+      if (_propertiesTabHandle == IntPtr.Zero)
+      {
+        vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: native Properties tab handle not found.");
+        return;
+      }
+
+      _lastObservedTabTitle = GetSelectedTabTitle(_propertiesTabHandle);
+      vObjectPropertiesPlusPlugIn.DebugLog($"LauncherPage: hooked native tab handle, selected tab='{_lastObservedTabTitle ?? "<null>"}'.");
+    }
+
+    if (_tabMonitorAttached)
+      return;
+
+    RhinoApp.Idle += OnIdleMonitorPropertiesTab;
+    _tabMonitorAttached = true;
   }
 
-  // Resolve the Properties TabControl once the page is actually parented.
-  // LoadComplete is sometimes too early, so we also retry from OnActivate.
-  private void EnsureTabControlHooked(IntPtr hwndParent)
+  private void OnIdleMonitorPropertiesTab(object? sender, EventArgs e)
   {
-    if (_propertiesTabControl != null) return;
+    if (_propertiesTabHandle == IntPtr.Zero || !IsWindow(_propertiesTabHandle))
+    {
+      _propertiesTabHandle = IntPtr.Zero;
+      _lastObservedTabTitle = null;
+      EnsureTabMonitorHooked();
+      return;
+    }
 
+    string? title = GetSelectedTabTitle(_propertiesTabHandle);
+    if (string.Equals(title, _lastObservedTabTitle, StringComparison.Ordinal))
+      return;
+
+    _lastObservedTabTitle = title;
+    vObjectPropertiesPlusPlugIn.DebugLog($"LauncherPage: selected tab changed to '{title ?? "<null>"}'.");
+
+    if (title != null && SafeTabs.Contains(title))
+    {
+      OpenIfSelected();
+      return;
+    }
+
+    if (!string.IsNullOrWhiteSpace(title))
+      HidePanel();
+  }
+
+  private static IntPtr FindPropertiesTabHandle(IntPtr parentHandle)
+  {
+    IntPtr found = IntPtr.Zero;
+    EnumChildWindows(parentHandle, (childHandle, _) =>
+    {
+      if (!IsTabControlWindow(childHandle)) return true;
+      if (!TabContainsTitle(childHandle, "Object+")) return true;
+      found = childHandle;
+      return false;
+    }, IntPtr.Zero);
+    return found;
+  }
+
+  private static bool IsTabControlWindow(IntPtr handle)
+  {
+    var className = new StringBuilder(64);
+    return GetClassName(handle, className, className.Capacity) > 0
+      && string.Equals(className.ToString(), "SysTabControl32", StringComparison.Ordinal);
+  }
+
+  private static bool TabContainsTitle(IntPtr tabHandle, string title)
+  {
+    int count = GetTabCount(tabHandle);
+    for (int index = 0; index < count; index++)
+    {
+      if (string.Equals(GetTabText(tabHandle, index)?.Trim(), title, StringComparison.OrdinalIgnoreCase))
+        return true;
+    }
+
+    return false;
+  }
+
+  private static int GetTabCount(IntPtr tabHandle)
+    => unchecked((int)SendMessage(tabHandle, TCM_GETITEMCOUNT, IntPtr.Zero, IntPtr.Zero).ToInt64());
+
+  private static string? GetSelectedTabTitle(IntPtr tabHandle)
+  {
+    int index = unchecked((int)SendMessage(tabHandle, TCM_GETCURSEL, IntPtr.Zero, IntPtr.Zero).ToInt64());
+    if (index < 0)
+      return null;
+
+    return GetTabText(tabHandle, index)?.Trim();
+  }
+
+  private static string? GetTabText(IntPtr tabHandle, int index)
+  {
+    const int bufferChars = 256;
+    IntPtr buffer = Marshal.AllocHGlobal(bufferChars * sizeof(char));
     try
     {
-      var native = GetNativeControl(hwndParent) ?? GetNativeControl(_control);
-      if (native == null)
+      var item = new TCITEM
       {
-        vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: native control not available for tab hook.");
-        return;
-      }
+        mask = TCIF_TEXT,
+        pszText = buffer,
+        cchTextMax = bufferChars
+      };
 
-      var tabControl = FindPropertiesTabControl(native);
-      if (tabControl == null)
-      {
-        vObjectPropertiesPlusPlugIn.DebugLog("LauncherPage: Properties TabControl not found.");
-        return;
-      }
+      for (int i = 0; i < bufferChars; i++)
+        Marshal.WriteInt16(buffer, i * sizeof(char), 0);
 
-      _propertiesTabControl = tabControl;
-      _propertiesTabControl.SelectedIndexChanged += OnPropertiesTabChanged;
-      vObjectPropertiesPlusPlugIn.DebugLog($"LauncherPage: hooked TabControl, selected tab='{_propertiesTabControl.SelectedTab?.Text?.Trim() ?? "<null>"}'.");
+      IntPtr result = SendMessage(tabHandle, TCM_GETITEMW, new IntPtr(index), ref item);
+      if (result == IntPtr.Zero)
+        return null;
+
+      return Marshal.PtrToStringUni(buffer);
     }
-    catch (Exception ex)
+    finally
     {
-      vObjectPropertiesPlusPlugIn.DebugLog($"LauncherPage: failed to hook TabControl: {ex.Message}");
+      Marshal.FreeHGlobal(buffer);
     }
   }
-
-  private static System.Windows.Forms.Control? GetNativeControl(IntPtr hwndParent)
-  {
-    if (hwndParent == IntPtr.Zero) return null;
-    try { return System.Windows.Forms.Control.FromHandle(hwndParent); }
-    catch { return null; }
-  }
-
-  private static System.Windows.Forms.Control? GetNativeControl(Eto.Forms.Control control)
-  {
-    var handler = control.Handler;
-    var type = handler?.GetType();
-    var prop = type?.GetProperty("Control")
-            ?? type?.GetProperty("ContainerControl")
-            ?? type?.GetProperty("Widget");
-    return prop?.GetValue(handler) as System.Windows.Forms.Control;
-  }
-
-  private static TabControl? FindPropertiesTabControl(System.Windows.Forms.Control native)
-  {
-    for (var parent = native.Parent; parent != null; parent = parent.Parent)
-    {
-      if (parent is TabControl tabControl && HasObjectPlusTab(tabControl))
-        return tabControl;
-    }
-
-    var root = native.FindForm() ?? native.TopLevelControl ?? native;
-    foreach (var child in EnumerateControls(root))
-    {
-      if (child is TabControl tabControl && HasObjectPlusTab(tabControl))
-        return tabControl;
-    }
-
-    return null;
-  }
-
-  private static IEnumerable<System.Windows.Forms.Control> EnumerateControls(System.Windows.Forms.Control root)
-  {
-    yield return root;
-    foreach (System.Windows.Forms.Control child in root.Controls)
-    {
-      foreach (var descendant in EnumerateControls(child))
-        yield return descendant;
-    }
-  }
-
-  private static bool HasObjectPlusTab(TabControl tabControl)
-    => tabControl.TabPages.Cast<TabPage>().Any(tp =>
-      string.Equals(tp.Text?.Trim(), "Object+", StringComparison.OrdinalIgnoreCase));
 
   private static bool HasSelectedObjects()
     => RhinoDoc.ActiveDoc?.Objects.GetSelectedObjects(false, false).Any() == true;
@@ -184,19 +228,8 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
     ShowPanel();
   }
 
-  private void OnPropertiesTabChanged(object? sender, EventArgs e)
-  {
-    if (sender is not TabControl tc) return;
-    string? title = tc.SelectedTab?.Text?.Trim();
-    vObjectPropertiesPlusPlugIn.DebugLog($"LauncherPage: selected tab changed to '{title ?? "<null>"}'.");
-    if (title != null && SafeTabs.Contains(title))
-    {
-      OpenIfSelected();
-      return;
-    }
-
-    HidePanel();
-  }
+  private void OnSelect(object? sender, RhinoObjectSelectionEventArgs e)
+    => CancelScheduledClose();
 
   private void OnDeselectAll(object? sender, RhinoDeselectAllObjectsEventArgs e)
     => ScheduleCloseIfNothingSelected(e.Document);
@@ -212,12 +245,21 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
     RhinoApp.Idle += OnIdleCloseIfNothingSelected;
   }
 
+  private void CancelScheduledClose()
+  {
+    _pendingCloseDoc = null;
+    if (!_closeCheckScheduled) return;
+    RhinoApp.Idle -= OnIdleCloseIfNothingSelected;
+    _closeCheckScheduled = false;
+  }
+
   private void OnIdleCloseIfNothingSelected(object? sender, EventArgs e)
   {
     RhinoApp.Idle -= OnIdleCloseIfNothingSelected;
     _closeCheckScheduled = false;
-    CloseIfNothingSelected(_pendingCloseDoc);
+    RhinoDoc? doc = _pendingCloseDoc;
     _pendingCloseDoc = null;
+    CloseIfNothingSelected(doc);
   }
 
   private static void CloseIfNothingSelected(RhinoDoc? doc)
@@ -225,5 +267,42 @@ internal class vObjectPropertiesPlusLauncherPage : ObjectPropertiesPage
     if (doc == null || doc.Objects.GetSelectedObjects(false, false).Any()) return;
     HidePanel();
   }
+
+  private const int TCM_FIRST = 0x1300;
+  private const int TCM_GETITEMCOUNT = TCM_FIRST + 4;
+  private const int TCM_GETCURSEL = TCM_FIRST + 11;
+  private const int TCM_GETITEMW = TCM_FIRST + 60;
+  private const uint TCIF_TEXT = 0x0001;
+
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+  private struct TCITEM
+  {
+    public uint mask;
+    public uint dwState;
+    public uint dwStateMask;
+    public IntPtr pszText;
+    public int cchTextMax;
+    public int iImage;
+    public IntPtr lParam;
+  }
+
+  private delegate bool EnumChildProc(IntPtr childHandle, IntPtr lParam);
+
+  [DllImport("user32.dll")]
+  [return: MarshalAs(UnmanagedType.Bool)]
+  private static extern bool EnumChildWindows(IntPtr parentHandle, EnumChildProc callback, IntPtr lParam);
+
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+  private static extern int GetClassName(IntPtr handle, StringBuilder className, int maxCount);
+
+  [DllImport("user32.dll")]
+  [return: MarshalAs(UnmanagedType.Bool)]
+  private static extern bool IsWindow(IntPtr handle);
+
+  [DllImport("user32.dll", EntryPoint = "SendMessageW", CharSet = CharSet.Unicode)]
+  private static extern IntPtr SendMessage(IntPtr handle, int msg, IntPtr wParam, IntPtr lParam);
+
+  [DllImport("user32.dll", EntryPoint = "SendMessageW", CharSet = CharSet.Unicode)]
+  private static extern IntPtr SendMessage(IntPtr handle, int msg, IntPtr wParam, ref TCITEM item);
 }
 
