@@ -528,6 +528,13 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       SetControlEnabled(_densityStepper, false);
       SetControlEnabled(_showIsocurveCheck, false);
       
+      // Hide non-curve fields
+      _polygonSidesLabel.Visible = false;
+      _polygonSidesStepper.Visible = false;
+      _infoPlusSection.Visible = true;
+      _textSection.Visible = false;
+      DisableRectangleSideHighlight();
+      
       // Enable curve-specific controls
       _totalLengthNameLabel.Text = "Total length";
       _curveMetricLabel.Text = "Length";
@@ -550,6 +557,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       SetControlEnabled(_totalLengthUnitDrop, true);
       SetControlEnabled(_radiusUnitDrop, true);
       SetControlEnabled(_diameterUnitDrop, true);
+      SetControlEnabled(_infoFormatDrop, true);
+      SetControlEnabled(_infoPrecisionDrop, true);
       
       // Compute curve metrics for the segment(s)
       // If a specific segment is focused, show only that segment's metrics
