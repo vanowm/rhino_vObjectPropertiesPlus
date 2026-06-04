@@ -638,6 +638,11 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     EnsureDocUnitPrefsLoaded(doc);
 
     var objectList = objects?.ToList() ?? new List<RhinoObject>();
+    
+    // Update Match and Details button states based on selection
+    bool hasSelection = objectList.Count > 0;
+    _matchButton.Enabled = hasSelection;
+    _detailsButton.Enabled = hasSelection;
 
     // When called with the full selection (not a focused-object drill-down), save it.
     // A full-selection call always comes in with all _selectedObjectIds matching the new list,
@@ -1123,11 +1128,6 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     SetEditableTextValue(_diameterBox, FormatInfoNumber(displayDiameters[0], _diameterUnitDrop));
     EnsureSegmentReadOnlyInfoBoxesAreSelectable(hasSegmentSelection);
     RefreshRectangleSideHighlight();
-    
-    // Update Match and Details button states based on selection
-    bool hasSelection = objectList.Count > 0;
-    _matchButton.Enabled = hasSelection;
-    _detailsButton.Enabled = hasSelection;
     }
     finally
     {
