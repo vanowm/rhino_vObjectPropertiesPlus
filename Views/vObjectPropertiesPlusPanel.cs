@@ -3291,12 +3291,10 @@ public sealed class vObjectPropertiesPlusPanel : Panel
               if (angleSpan > RhinoMath.ZeroTolerance)
               {
                 double newRadius = targetLength / angleSpan;
-                double radiusScale = newRadius / arc.Radius;
-                // Scale the arc from its center
-                var xform = Transform.Scale(arc.Center, radiusScale);
-                modifiedSegment = segment.DuplicateCurve();
-                if (!modifiedSegment.Transform(xform))
-                  return;
+                var newArc = arc;
+                newArc.Radius = newRadius;
+                if (newArc.IsValid)
+                  modifiedSegment = new ArcCurve(newArc);
               }
             }
             // For other curve types, scale around segment center
@@ -3438,10 +3436,13 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
           if (i == _focusedSegmentIndex && segment is ArcCurve arc)
           {
-            // Create new arc with modified radius
-            var circle = new Circle(arc.Arc.Plane, arc.Arc.Center, targetRadius);
-            var newArc = new Arc(circle, arc.Arc.AngleDomain);
-            newPolyCurve.Append(new ArcCurve(newArc));
+            // Create new arc with modified radius (same as regular arc editing)
+            var newArc = arc.Arc;
+            newArc.Radius = targetRadius;
+            if (newArc.IsValid)
+              newPolyCurve.Append(new ArcCurve(newArc));
+            else
+              newPolyCurve.Append(segment);
           }
           else
           {
