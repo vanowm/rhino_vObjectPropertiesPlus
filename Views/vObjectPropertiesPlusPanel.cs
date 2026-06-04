@@ -83,6 +83,9 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private readonly Control _infoPlusSection;
   private readonly TableLayout _textSection;
 
+  private readonly Button _matchButton;
+  private readonly Button _detailsButton;
+
   private readonly Dictionary<string, Image?> _uiIconCache = new(StringComparer.OrdinalIgnoreCase);
   private readonly Dictionary<Guid, bool> _layerExpandedState = new();
   private string _currentLayerFullPath = "-";
@@ -266,11 +269,11 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _receivesShadowsCheck.CheckedChanged += (_, _) => ApplyReceivesShadows();
     _showIsocurveCheck.CheckedChanged += (_, _) => ApplyShowIsocurve();
 
-    var matchButton = new Button { Text = "Match" };
-    matchButton.Click += (_, _) => RhinoApp.RunScript("_MatchProperties", false);
+    _matchButton = new Button { Text = "Match" };
+    _matchButton.Click += (_, _) => RhinoApp.RunScript("_MatchProperties", false);
 
-    var detailsButton = new Button { Text = "Details" };
-    detailsButton.Click += (_, _) => RhinoApp.RunScript("_What", false);
+    _detailsButton = new Button { Text = "Details" };
+    _detailsButton.Click += (_, _) => RhinoApp.RunScript("_What", false);
 
     _layerDrop.ItemTextBinding = Binding.Property<LayerDropItem, string>(i => i.DisplayText);
     _layerDrop.ItemImageBinding = Binding.Property<LayerDropItem, Image>(i => i.Swatch);
@@ -428,8 +431,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
           Padding = new Eto.Drawing.Padding(6, 2, 6, 4),
           Items =
           {
-            new StackLayoutItem(matchButton, true),
-            new StackLayoutItem(detailsButton, true)
+            new StackLayoutItem(_matchButton, true),
+            new StackLayoutItem(_detailsButton, true)
           }
         }
       }
@@ -1120,6 +1123,11 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     SetEditableTextValue(_diameterBox, FormatInfoNumber(displayDiameters[0], _diameterUnitDrop));
     EnsureSegmentReadOnlyInfoBoxesAreSelectable(hasSegmentSelection);
     RefreshRectangleSideHighlight();
+    
+    // Update Match and Details button states based on selection
+    bool hasSelection = objectList.Count > 0;
+    _matchButton.Enabled = hasSelection;
+    _detailsButton.Enabled = hasSelection;
     }
     finally
     {
@@ -1234,6 +1242,9 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     SetControlEnabled(_textItalicBtn, false);
     _textUnderlineBtn.Checked = false;
     SetControlEnabled(_textUnderlineBtn, false);
+    
+    _matchButton.Enabled = false;
+    _detailsButton.Enabled = false;
   }
 
   private void EnsureSegmentReadOnlyInfoBoxesAreSelectable(bool hasSegmentSelection)
