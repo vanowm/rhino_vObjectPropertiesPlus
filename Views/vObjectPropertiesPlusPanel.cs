@@ -80,7 +80,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private readonly DropDown _textHeightUnitDrop;
   private readonly TextArea _textContentArea;
   private readonly UITimer _textContentTimer = new UITimer { Interval = 0.4 };
-  private readonly StackLayout _infoPlusSection;
+  private readonly Control _infoPlusSection;
   private readonly TableLayout _textSection;
 
   private readonly Dictionary<string, Image?> _uiIconCache = new(StringComparer.OrdinalIgnoreCase);
@@ -275,13 +275,22 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _layerDrop.ItemTextBinding = Binding.Property<LayerDropItem, string>(i => i.DisplayText);
     _layerDrop.ItemImageBinding = Binding.Property<LayerDropItem, Image>(i => i.Swatch);
 
-    var objectTable = new TableLayout
+    var typeTable = new TableLayout
     {
       Spacing = new Eto.Drawing.Size(4, 1),
       Padding = new Eto.Drawing.Padding(10, 2, 6, 2),
       Rows =
       {
         NewValueRow("Type", _typeDrop),
+      }
+    };
+
+    var generalTable = new TableLayout
+    {
+      Spacing = new Eto.Drawing.Size(4, 1),
+      Padding = new Eto.Drawing.Padding(10, 2, 6, 2),
+      Rows =
+      {
         NewValueRow("Name", _nameBox),
         NewValueRow("Layer", _layerDrop),
         NewControlWithButtonRow("Display Color", _displayColorDrop, _displayColorButton),
@@ -343,9 +352,11 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       }
     };
 
-    _infoPlusSection = new StackLayout
+    _infoPlusSection = plusTable;
+
+    var generalSection = new StackLayout
     {
-      Items = { NewSectionLabel("Info+"), plusTable, NewRule() }
+      Items = { NewSectionLabel("General"), generalTable, NewRule() }
     };
 
     var textTable = new TableLayout
@@ -404,8 +415,9 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       HorizontalContentAlignment = HorizontalAlignment.Stretch,
       Items =
       {
-        objectTable,
+        typeTable,
         _infoPlusSection,
+        generalSection,
         _textSection,
         NewSectionLabel("Render Mesh Settings"),
         meshTable,
