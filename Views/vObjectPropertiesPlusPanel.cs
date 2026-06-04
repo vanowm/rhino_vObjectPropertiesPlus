@@ -354,11 +354,6 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
     _infoPlusSection = plusTable;
 
-    var generalSection = new StackLayout
-    {
-      Items = { NewSectionLabel("General"), generalTable, NewRule() }
-    };
-
     var textTable = new TableLayout
     {
       Spacing = new Eto.Drawing.Size(4, 1),
@@ -417,7 +412,9 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       {
         typeTable,
         _infoPlusSection,
-        generalSection,
+        NewSectionLabel("General"),
+        generalTable,
+        NewRule(),
         _textSection,
         NewSectionLabel("Render Mesh Settings"),
         meshTable,
