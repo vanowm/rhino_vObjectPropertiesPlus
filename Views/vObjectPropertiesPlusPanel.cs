@@ -270,10 +270,10 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _showIsocurveCheck.CheckedChanged += (_, _) => ApplyShowIsocurve();
 
     _matchButton = new Button { Text = "Match" };
-    _matchButton.Click += (_, _) => RhinoApp.RunScript("_MatchProperties", false);
+    _matchButton.Click += (_, _) => RunMatchProperties();
 
     _detailsButton = new Button { Text = "Details" };
-    _detailsButton.Click += (_, _) => RhinoApp.RunScript("_What", false);
+    _detailsButton.Click += (_, _) => RunDetails();
 
     _layerDrop.ItemTextBinding = Binding.Property<LayerDropItem, string>(i => i.DisplayText);
     _layerDrop.ItemImageBinding = Binding.Property<LayerDropItem, Image>(i => i.Swatch);
@@ -1858,6 +1858,34 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
     var objs = SelectedRhinoObjects().ToList();
     UpdateFromSelection(_doc, objs);
+  }
+
+  private void RunMatchProperties()
+  {
+    if (_doc == null || _allSelectedObjects.Count == 0)
+      return;
+
+    // Ensure all tracked objects are selected in Rhino
+    _doc.Objects.UnselectAll();
+    foreach (var obj in _allSelectedObjects)
+      obj.Select(true);
+    _doc.Views.Redraw();
+
+    RhinoApp.RunScript("_MatchProperties", false);
+  }
+
+  private void RunDetails()
+  {
+    if (_doc == null || _allSelectedObjects.Count == 0)
+      return;
+
+    // Ensure all tracked objects are selected in Rhino
+    _doc.Objects.UnselectAll();
+    foreach (var obj in _allSelectedObjects)
+      obj.Select(true);
+    _doc.Views.Redraw();
+
+    RhinoApp.RunScript("_What", false);
   }
 
   private void ApplyAttributes(Action<ObjectAttributes> update)
