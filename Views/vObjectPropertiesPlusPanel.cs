@@ -3282,18 +3282,21 @@ public sealed class vObjectPropertiesPlusPanel : Panel
               Point3d newEnd = start + direction * targetLength;
               modifiedSegment = new LineCurve(start, newEnd);
             }
-            // Handle arc segments - scale around arc center
+            // Handle arc segments - preserve angles, adjust radius
             else if (segment is ArcCurve arcCurve)
             {
               // For arc length L = r * θ, if we want new length L', we need r' = L' / θ
               var arc = arcCurve.Arc;
-              double angleSpan = arc.AngleDomain.Length;
+              double angleSpan = arc.Angle;
               if (angleSpan > RhinoMath.ZeroTolerance)
               {
                 double newRadius = targetLength / angleSpan;
-                var newCircle = new Circle(arc.Plane, arc.Center, newRadius);
-                var newArc = new Arc(newCircle, arc.AngleDomain);
-                modifiedSegment = new ArcCurve(newArc);
+                double radiusScale = newRadius / arc.Radius;
+                // Scale the arc from its center
+                var xform = Transform.Scale(arc.Center, radiusScale);
+                modifiedSegment = segment.DuplicateCurve();
+                if (!modifiedSegment.Transform(xform))
+                  return;
               }
             }
             // For other curve types, scale around segment center
