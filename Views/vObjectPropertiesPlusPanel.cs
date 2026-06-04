@@ -535,10 +535,10 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       // Now override geometry metrics with segment-specific values
       SetControlEnabled(_infoPrecisionDrop, true);
       
-      // Make geometry metrics read-only for segments (can't edit individual segment dimensions)
-      _curveMetricBox.ReadOnly = true;
-      _radiusBox.ReadOnly = true;
-      _diameterBox.ReadOnly = true;
+      // Segment geometry metrics are editable - they will modify the specific segment
+      _curveMetricBox.ReadOnly = false;
+      _radiusBox.ReadOnly = false;
+      _diameterBox.ReadOnly = false;
       
       // Compute curve metrics for the segment(s)
       // If a specific segment is focused, show only that segment's metrics
@@ -3094,6 +3094,13 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       return;
     double radius = ConvertLength(radiusDisplay, GetSelectedUnitSystem(_radiusUnitDrop, _doc), _doc.ModelUnitSystem);
 
+    // Check if we're editing a specific segment
+    if (_focusedSegmentIndex >= 0 && _currentCurveInfos != null)
+    {
+      ApplyEditedSegmentRadius(radius);
+      return;
+    }
+
     if (ApplyRectangleDimensionsToSelection(radius, null))
       return;
 
@@ -3122,6 +3129,13 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     if (_doc == null)
       return;
     double diameter = ConvertLength(diameterDisplay, GetSelectedUnitSystem(_diameterUnitDrop, _doc), _doc.ModelUnitSystem);
+
+    // Check if we're editing a specific segment
+    if (_focusedSegmentIndex >= 0 && _currentCurveInfos != null)
+    {
+      ApplyEditedSegmentRadius(diameter * 0.5);
+      return;
+    }
 
     if (ApplyRectangleDimensionsToSelection(null, diameter))
       return;
@@ -3157,6 +3171,13 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     double targetLength = ConvertLength(targetLengthDisplay, GetSelectedUnitSystem(_curveMetricUnitDrop, _doc), _doc.ModelUnitSystem);
     if (targetLength <= RhinoMath.ZeroTolerance)
       return;
+
+    // Check if we're editing a specific segment
+    if (_focusedSegmentIndex >= 0 && _currentCurveInfos != null)
+    {
+      ApplyEditedSegmentLength(targetLength);
+      return;
+    }
 
     uint undoRecord = _doc.BeginUndoRecord("Properties+ Length");
     bool changed = false;
@@ -3200,6 +3221,200 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     {
       _doc.Views.Redraw();
       RefreshFromCurrentSelection();
+    }
+  }
+
+  private void ApplyEditedSegmentLength(double targetLength)
+  {
+    if (_doc == null || _currentCurveInfos == null || _focusedSegmentIndex < 0)
+      return;
+
+    // Find the focused segment
+    var focusedSegment = _currentCurveInfos.FirstOrDefault(s => 
+      s.SegmentIndex == _focusedSegmentIndex && s.ParentObject.Id == _focusedObjectId);
+    
+    if (focusedSegment == null)
+      return;
+
+    var parentObj = focusedSegment.ParentObject;
+    if (parentObj.Geometry is not Curve parentCurve)
+      return;
+
+    uint undoRecord = _doc.BeginUndoRecord("Properties+ Segment Length");
+    bool changed = false;
+    try
+    {
+      // Get current segment length and calculate scale
+      double currentLength = focusedSegment.Curve.GetLength();
+      if (currentLength <= RhinoMath.ZeroTolerance)
+        return;
+
+      double scale = targetLength / currentLength;
+
+      Curve? newParentCurve = null;
+
+      // Handle PolyCurve
+      if (parentCurve is PolyCurve polyCurve)
+      {
+        var newPolyCurve = new PolyCurve();
+        int segmentCount = polyCurve.SegmentCount;
+        
+        for (int i = 0; i < segmentCount; i++)
+        {
+          var segment = polyCurve.SegmentCurve(i);
+          if (segment == null)
+            continue;
+
+          if (i == _focusedSegmentIndex)
+          {
+            // Scale this segment
+            var bbox = segment.GetBoundingBox(true);
+            var xform = Transform.Scale(bbox.Center, scale);
+            var scaledSegment = segment.DuplicateCurve();
+            if (!scaledSegment.Transform(xform))
+              return;
+            newPolyCurve.Append(scaledSegment);
+          }
+          else
+          {
+            newPolyCurve.Append(segment);
+          }
+        }
+        
+        newParentCurve = newPolyCurve;
+      }
+      // Handle PolylineCurve
+      else if (parentCurve is PolylineCurve polylineCurve)
+      {
+        var points = new List<Point3d>();
+        int pointCount = polylineCurve.PointCount;
+        
+        for (int i = 0; i < pointCount; i++)
+        {
+          points.Add(polylineCurve.Point(i));
+        }
+
+        // For a polyline, segment index i is the line from point i to point i+1
+        if (_focusedSegmentIndex >= 0 && _focusedSegmentIndex < points.Count - 1)
+        {
+          Point3d p0 = points[_focusedSegmentIndex];
+          Point3d p1 = points[_focusedSegmentIndex + 1];
+          
+          Vector3d direction = p1 - p0;
+          direction.Unitize();
+          
+          // Move p1 to achieve target length
+          points[_focusedSegmentIndex + 1] = p0 + direction * targetLength;
+        }
+
+        newParentCurve = new PolylineCurve(points);
+      }
+
+      if (newParentCurve != null)
+      {
+        changed = _doc.Objects.Replace(parentObj.Id, newParentCurve);
+      }
+    }
+    finally
+    {
+      if (undoRecord != 0)
+        _doc.EndUndoRecord(undoRecord);
+    }
+
+    if (changed)
+    {
+      _doc.Views.Redraw();
+      // Stay on the segment view after edit
+      var freshObj = _doc.Objects.FindId(_focusedObjectId);
+      if (freshObj != null)
+      {
+        var segments = GetInfoCurvesForSelection(new[] { freshObj }, out _);
+        if (segments.Any(s => s.SegmentIndex == _focusedSegmentIndex))
+        {
+          RefreshForSegmentSelection(segments, _focusedSegmentIndex);
+        }
+      }
+    }
+  }
+
+  private void ApplyEditedSegmentRadius(double targetRadius)
+  {
+    if (_doc == null || _currentCurveInfos == null || _focusedSegmentIndex < 0)
+      return;
+
+    // Find the focused segment
+    var focusedSegment = _currentCurveInfos.FirstOrDefault(s => 
+      s.SegmentIndex == _focusedSegmentIndex && s.ParentObject.Id == _focusedObjectId);
+    
+    if (focusedSegment == null)
+      return;
+
+    var parentObj = focusedSegment.ParentObject;
+    if (parentObj.Geometry is not Curve parentCurve)
+      return;
+
+    // Only arc segments have radius
+    if (focusedSegment.Curve is not ArcCurve arcSegment)
+      return;
+
+    uint undoRecord = _doc.BeginUndoRecord("Properties+ Segment Radius");
+    bool changed = false;
+    try
+    {
+      Curve? newParentCurve = null;
+
+      // Handle PolyCurve
+      if (parentCurve is PolyCurve polyCurve)
+      {
+        var newPolyCurve = new PolyCurve();
+        int segmentCount = polyCurve.SegmentCount;
+        
+        for (int i = 0; i < segmentCount; i++)
+        {
+          var segment = polyCurve.SegmentCurve(i);
+          if (segment == null)
+            continue;
+
+          if (i == _focusedSegmentIndex && segment is ArcCurve arc)
+          {
+            // Create new arc with modified radius
+            var circle = new Circle(arc.Arc.Plane, arc.Arc.Center, targetRadius);
+            var newArc = new Arc(circle, arc.Arc.AngleDomain);
+            newPolyCurve.Append(new ArcCurve(newArc));
+          }
+          else
+          {
+            newPolyCurve.Append(segment);
+          }
+        }
+        
+        newParentCurve = newPolyCurve;
+      }
+
+      if (newParentCurve != null)
+      {
+        changed = _doc.Objects.Replace(parentObj.Id, newParentCurve);
+      }
+    }
+    finally
+    {
+      if (undoRecord != 0)
+        _doc.EndUndoRecord(undoRecord);
+    }
+
+    if (changed)
+    {
+      _doc.Views.Redraw();
+      // Stay on the segment view after edit
+      var freshObj = _doc.Objects.FindId(_focusedObjectId);
+      if (freshObj != null)
+      {
+        var segments = GetInfoCurvesForSelection(new[] { freshObj }, out _);
+        if (segments.Any(s => s.SegmentIndex == _focusedSegmentIndex))
+        {
+          RefreshForSegmentSelection(segments, _focusedSegmentIndex);
+        }
+      }
     }
   }
 
