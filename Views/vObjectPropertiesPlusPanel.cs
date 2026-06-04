@@ -3249,6 +3249,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       if (currentLength <= RhinoMath.ZeroTolerance)
         return;
 
+      vObjectPropertiesPlusPlugIn.DebugLog($"ApplyEditedSegmentLength: targetLength={targetLength}, currentLength={currentLength}, segmentType={focusedSegment.Curve.GetType().Name}");
+
       double scale = targetLength / currentLength;
 
       Curve? newParentCurve = null;
@@ -3267,13 +3269,47 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
           if (i == _focusedSegmentIndex)
           {
-            // Scale this segment
-            var bbox = segment.GetBoundingBox(true);
-            var xform = Transform.Scale(bbox.Center, scale);
-            var scaledSegment = segment.DuplicateCurve();
-            if (!scaledSegment.Transform(xform))
-              return;
-            newPolyCurve.Append(scaledSegment);
+            // Modify this segment to achieve target length
+            Curve? modifiedSegment = null;
+            
+            // Handle line segments
+            if (segment is LineCurve lineCurve)
+            {
+              Point3d start = lineCurve.PointAtStart;
+              Point3d end = lineCurve.PointAtEnd;
+              Vector3d direction = end - start;
+              direction.Unitize();
+              Point3d newEnd = start + direction * targetLength;
+              modifiedSegment = new LineCurve(start, newEnd);
+            }
+            // Handle arc segments - scale around arc center
+            else if (segment is ArcCurve arcCurve)
+            {
+              // For arc length L = r * θ, if we want new length L', we need r' = L' / θ
+              var arc = arcCurve.Arc;
+              double angleSpan = arc.AngleDomain.Length;
+              if (angleSpan > RhinoMath.ZeroTolerance)
+              {
+                double newRadius = targetLength / angleSpan;
+                var newCircle = new Circle(arc.Plane, arc.Center, newRadius);
+                var newArc = new Arc(newCircle, arc.AngleDomain);
+                modifiedSegment = new ArcCurve(newArc);
+              }
+            }
+            // For other curve types, scale around segment center
+            else
+            {
+              var bbox = segment.GetBoundingBox(true);
+              var xform = Transform.Scale(bbox.Center, scale);
+              modifiedSegment = segment.DuplicateCurve();
+              if (!modifiedSegment.Transform(xform))
+                return;
+            }
+            
+            if (modifiedSegment != null)
+              newPolyCurve.Append(modifiedSegment);
+            else
+              newPolyCurve.Append(segment);
           }
           else
           {
@@ -3313,6 +3349,25 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       if (newParentCurve != null)
       {
         changed = _doc.Objects.Replace(parentObj.Id, newParentCurve);
+        
+        if (changed)
+        {
+          // Debug: verify the actual length achieved
+          if (newParentCurve is PolyCurve pc && _focusedSegmentIndex < pc.SegmentCount)
+          {
+            var resultSegment = pc.SegmentCurve(_focusedSegmentIndex);
+            if (resultSegment != null)
+            {
+              double actualLength = resultSegment.GetLength();
+              vObjectPropertiesPlusPlugIn.DebugLog($"ApplyEditedSegmentLength: actualLength={actualLength}, difference={Math.Abs(actualLength - targetLength)}");
+            }
+          }
+          else if (newParentCurve is PolylineCurve plc && _focusedSegmentIndex < plc.PointCount - 1)
+          {
+            double actualLength = plc.Point(_focusedSegmentIndex).DistanceTo(plc.Point(_focusedSegmentIndex + 1));
+            vObjectPropertiesPlusPlugIn.DebugLog($"ApplyEditedSegmentLength: actualLength={actualLength}, difference={Math.Abs(actualLength - targetLength)}");
+          }
+        }
       }
     }
     finally
@@ -3357,6 +3412,9 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     if (focusedSegment.Curve is not ArcCurve arcSegment)
       return;
 
+    double currentRadius = arcSegment.Arc.Radius;
+    vObjectPropertiesPlusPlugIn.DebugLog($"ApplyEditedSegmentRadius: targetRadius={targetRadius}, currentRadius={currentRadius}");
+
     uint undoRecord = _doc.BeginUndoRecord("Properties+ Segment Radius");
     bool changed = false;
     try
@@ -3394,6 +3452,17 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       if (newParentCurve != null)
       {
         changed = _doc.Objects.Replace(parentObj.Id, newParentCurve);
+        
+        if (changed && newParentCurve is PolyCurve pc && _focusedSegmentIndex < pc.SegmentCount)
+        {
+          // Debug: verify the actual radius achieved
+          var resultSegment = pc.SegmentCurve(_focusedSegmentIndex);
+          if (resultSegment is ArcCurve resultArc)
+          {
+            double actualRadius = resultArc.Arc.Radius;
+            vObjectPropertiesPlusPlugIn.DebugLog($"ApplyEditedSegmentRadius: actualRadius={actualRadius}, difference={Math.Abs(actualRadius - targetRadius)}");
+          }
+        }
       }
     }
     finally
