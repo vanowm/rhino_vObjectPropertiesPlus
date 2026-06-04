@@ -414,7 +414,6 @@ public sealed class vObjectPropertiesPlusPanel : Panel
         _infoPlusSection,
         NewSectionLabel("General"),
         generalTable,
-        NewRule(),
         _textSection,
         NewSectionLabel("Render Mesh Settings"),
         meshTable,
