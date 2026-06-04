@@ -9,10 +9,10 @@
     <Title>vObjectProperties+</Title>
     <RootNamespace>vObjectPropertiesPlus</RootNamespace>
     <LangVersion>latest</LangVersion>
-    <Version>26.6.3.1929</Version>
-    <InformationalVersion>26.6.3.1929</InformationalVersion>
-    <AssemblyVersion>26.6.3.1929</AssemblyVersion>
-    <FileVersion>26.6.3.1929</FileVersion>
+    <Version>26.6.4.835</Version>
+    <InformationalVersion>26.6.4.835</InformationalVersion>
+    <AssemblyVersion>26.6.4.835</AssemblyVersion>
+    <FileVersion>26.6.4.835</FileVersion>
   </PropertyGroup>
 
   <PropertyGroup>

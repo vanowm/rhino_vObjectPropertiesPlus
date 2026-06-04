@@ -535,6 +535,11 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       // Now override geometry metrics with segment-specific values
       SetControlEnabled(_infoPrecisionDrop, true);
       
+      // Make geometry metrics read-only for segments (can't edit individual segment dimensions)
+      _curveMetricBox.ReadOnly = true;
+      _radiusBox.ReadOnly = true;
+      _diameterBox.ReadOnly = true;
+      
       // Compute curve metrics for the segment(s)
       // If a specific segment is focused, show only that segment's metrics
       // Otherwise show combined metrics for all segments
@@ -742,6 +747,12 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       SetControlEnabled(_totalLengthUnitDrop, true);
       SetControlEnabled(_infoFormatDrop, true);
       SetControlEnabled(_infoPrecisionDrop, true);
+      
+      // Ensure geometry metric fields are editable (not read-only)
+      _curveMetricBox.ReadOnly = false;
+      _radiusBox.ReadOnly = false;
+      _diameterBox.ReadOnly = false;
+      
       SetControlEnabled(_textFontDrop, true);
       SetControlEnabled(_textHeightStepper, true);
       SetControlEnabled(_textHeightUnitDrop, true);
