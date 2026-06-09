@@ -85,6 +85,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
   private readonly Button _matchButton;
   private readonly Button _detailsButton;
+  private bool _refreshFromDocPending;
+  private RhinoDoc? _pendingRefreshDoc;
 
   private readonly Dictionary<string, Image?> _uiIconCache = new(StringComparer.OrdinalIgnoreCase);
   private readonly Dictionary<Guid, bool> _layerExpandedState = new();
@@ -456,8 +458,28 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
   private void RefreshFromDoc(RhinoDoc doc)
   {
+    if (_refreshFromDocPending)
+    {
+      _pendingRefreshDoc = doc;
+      return;
+    }
+
+    _refreshFromDocPending = true;
+    _pendingRefreshDoc = doc;
+
+    Application.Instance.AsyncInvoke(() =>
+    {
+      _refreshFromDocPending = false;
+      var refreshDoc = _pendingRefreshDoc ?? doc;
+      _pendingRefreshDoc = null;
+      DoRefreshFromDoc(refreshDoc);
+    });
+  }
+
+  private void DoRefreshFromDoc(RhinoDoc doc)
+  {
     var selected = doc.Objects.GetSelectedObjects(false, false).ToList();
-    vObjectPropertiesPlusPlugIn.DebugLog($"RefreshFromDoc: GetSelectedObjects returned {selected.Count} objects");
+    vObjectPropertiesPlusPlugIn.DebugLog($"DoRefreshFromDoc: GetSelectedObjects returned {selected.Count} objects");
     
     // If no normal selection, check for objects with selected subobjects (segments)
     if (selected.Count == 0)
@@ -474,14 +496,14 @@ public sealed class vObjectPropertiesPlusPanel : Panel
         {
           subObjCount++;
           selected.Add(obj);
-          vObjectPropertiesPlusPlugIn.DebugLog($"RefreshFromDoc: Found object with {subObjects.Length} selected subobjects: {obj.Id}");
+          vObjectPropertiesPlusPlugIn.DebugLog($"DoRefreshFromDoc: Found object with {subObjects.Length} selected subobjects: {obj.Id}");
         }
       }
-      vObjectPropertiesPlusPlugIn.DebugLog($"RefreshFromDoc: Checked all objects, found {subObjCount} with selected subobjects");
+      vObjectPropertiesPlusPlugIn.DebugLog($"DoRefreshFromDoc: Checked all objects, found {subObjCount} with selected subobjects");
     }
     
-    vObjectPropertiesPlusPlugIn.DebugLog($"RefreshFromDoc: Final selection count = {selected.Count}");
-    Application.Instance.AsyncInvoke(() => UpdateFromSelection(doc, selected));
+    vObjectPropertiesPlusPlugIn.DebugLog($"DoRefreshFromDoc: Final selection count = {selected.Count}");
+    UpdateFromSelection(doc, selected);
   }
 
   private void RefreshForSegmentSelection(List<CurveInfo> segments, int focusedSegmentIndex = -1)
