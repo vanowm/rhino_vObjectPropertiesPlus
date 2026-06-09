@@ -5173,7 +5173,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   }
 
 
-  private void ApplyToTextObjects(Action<TextEntity> apply)
+  private void ApplyToTextObjects(Action<TextEntity> apply, bool refresh = true)
   {
     if (_doc == null) return;
     uint undoRecord = _doc.BeginUndoRecord("Properties+ Text");
@@ -5196,7 +5196,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     if (changed)
     {
       _doc.Views.Redraw();
-      RefreshFromCurrentSelection();
+      if (refresh)
+        RefreshFromCurrentSelection();
     }
   }
 
@@ -5258,12 +5259,35 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       }
 
       var contents = texts.Select(t => t.PlainText ?? "").Distinct().ToList();
-      _textContentArea.Text = contents.Count == 1 ? contents[0] : "";
+      SetTextAreaTextPreservingSelection(_textContentArea, contents.Count == 1 ? contents[0] : "");
     }
     finally
     {
       _isUpdatingUi = false;
     }
+  }
+
+  private static void SetTextAreaTextPreservingSelection(TextArea textArea, string text)
+  {
+    if (textArea.Text == text) return;
+
+    var oldSelection = textArea.Selection;
+    int oldCaret = textArea.CaretIndex;
+    textArea.Text = text;
+
+    int maxIndex = Math.Max(0, text.Length);
+    int selectionStart = Math.Min(Math.Max(oldSelection.Start, 0), maxIndex);
+    int selectionEnd = Math.Min(Math.Max(oldSelection.End, 0), maxIndex);
+
+    if (selectionStart > selectionEnd)
+    {
+      int temp = selectionStart;
+      selectionStart = selectionEnd;
+      selectionEnd = temp;
+    }
+
+    textArea.Selection = new Range<int>(selectionStart, selectionEnd);
+    textArea.CaretIndex = Math.Min(Math.Max(oldCaret, 0), maxIndex);
   }
 
   private void ApplyTextFont()
@@ -5322,6 +5346,6 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   {
     if (_isUpdatingUi || _doc == null) return;
     string content = _textContentArea.Text ?? "";
-    ApplyToTextObjects(te => { te.PlainText = content; });
+    ApplyToTextObjects(te => { te.PlainText = content; }, refresh: false);
   }
 }
