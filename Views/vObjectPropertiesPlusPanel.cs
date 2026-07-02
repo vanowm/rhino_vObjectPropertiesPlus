@@ -460,6 +460,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     RhinoDoc.DeselectObjects    += (_, e) => { vObjectPropertiesPlusPlugIn.DebugLog("Event: DeselectObjects"); RefreshFromDoc(e.Document); };
     RhinoDoc.DeselectAllObjects += (_, e) => { vObjectPropertiesPlusPlugIn.DebugLog("Event: DeselectAllObjects"); RefreshFromDoc(e.Document); };
     RhinoDoc.ModifyObjectAttributes += (_, e) => { if (e.RhinoObject?.IsSelected(false) == 1) RefreshFromDoc(e.Document); };
+    RhinoDoc.EndOpenDocument          += (_, e) => { _unitPrefsLoadedDocSerial = 0; RefreshFromDoc(e.Document); };
+    RhinoDoc.DocumentPropertiesChanged += (_, e) => { _unitPrefsLoadedDocSerial = 0; RefreshFromDoc(e.Document); };
 
     SetEmptyState();
   }
