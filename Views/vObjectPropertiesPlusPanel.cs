@@ -248,9 +248,10 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       if (!_isUpdatingUi) {
         _textHeightUserEditing = true;
         ApplyTextHeight();
-        Application.Instance.AsyncInvoke(() => _textHeightUserEditing = false);
       }
     };
+    _textHeightStepper.GotFocus  += (_, _) => _textHeightUserEditing = true;
+    _textHeightStepper.LostFocus += (_, _) => _textHeightUserEditing = false;
     _textHeightUnitDrop.SelectedIndexChanged += (_, _) => OnUnitDropChanged(_textHeightUnitDrop, "TextHeight");
     _textAlignLeftBtn.Click += (_, _) => { if (!_isUpdatingUi) ApplyTextHAlignment(TextHorizontalAlignment.Left); };
     _textAlignCenterBtn.Click += (_, _) => { if (!_isUpdatingUi) ApplyTextHAlignment(TextHorizontalAlignment.Center); };
