@@ -133,6 +133,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private Guid _focusedObjectId = Guid.Empty;
   private int _focusedSegmentIndex = -1;
   private bool _isUpdatingUi;
+  private bool _textHeightUserEditing;
   private long _lastUserEditMs;
   private uint _unitPrefsLoadedDocSerial;
 
@@ -243,7 +244,13 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _polygonSidesStepper.ValueChanged += (_, _) => { if (!_isUpdatingUi) ApplyPolygonSides(); };
 
     _textFontDrop.SelectedIndexChanged += (_, _) => { if (!_isUpdatingUi) ApplyTextFont(); };
-    _textHeightStepper.ValueChanged += (_, _) => { if (!_isUpdatingUi) ApplyTextHeight(); };
+    _textHeightStepper.ValueChanged += (_, _) => {
+      if (!_isUpdatingUi) {
+        _textHeightUserEditing = true;
+        ApplyTextHeight();
+        Application.Instance.AsyncInvoke(() => _textHeightUserEditing = false);
+      }
+    };
     _textHeightUnitDrop.SelectedIndexChanged += (_, _) => OnUnitDropChanged(_textHeightUnitDrop, "TextHeight");
     _textAlignLeftBtn.Click += (_, _) => { if (!_isUpdatingUi) ApplyTextHAlignment(TextHorizontalAlignment.Left); };
     _textAlignCenterBtn.Click += (_, _) => { if (!_isUpdatingUi) ApplyTextHAlignment(TextHorizontalAlignment.Center); };
@@ -5208,6 +5215,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _textSection.Visible = isTextOnly;
     if (!isTextOnly) return;
 
+    bool prevUpdatingUi = _isUpdatingUi;
     _isUpdatingUi = true;
     try
     {
@@ -5231,7 +5239,11 @@ public sealed class vObjectPropertiesPlusPanel : Panel
         return ConvertLength(h, modelUnits, units);
       }).ToList();
       bool heightsSame = heights.Count > 0 && heights.All(h => RhinoMath.EpsilonEquals(h, heights[0], RhinoMath.SqrtEpsilon));
-      _textHeightStepper.Value = heightsSame ? heights[0] : 0;
+      // Don't override the stepper while the user is mid-edit; a spurious refresh
+      // (e.g. from a Rhino event fired synchronously during the apply) would wipe
+      // the value they just typed before it has been committed to the document.
+      if (!_textHeightUserEditing)
+        _textHeightStepper.Value = heightsSame ? heights[0] : 0;
 
       var hAligns = texts.Select(t => t.TextHorizontalAlignment).Distinct().ToList();
       _textAlignLeftBtn.Checked = hAligns.Count == 1 && hAligns[0] == TextHorizontalAlignment.Left;
@@ -5268,7 +5280,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     }
     finally
     {
-      _isUpdatingUi = false;
+      _isUpdatingUi = prevUpdatingUi;
     }
   }
 
