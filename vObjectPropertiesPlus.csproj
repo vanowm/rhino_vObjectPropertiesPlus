@@ -9,10 +9,17 @@
     <Title>vObjectProperties+</Title>
     <RootNamespace>vObjectPropertiesPlus</RootNamespace>
     <LangVersion>latest</LangVersion>
-    <Version>26.7.2.1122</Version>
-    <InformationalVersion>26.7.2.1122</InformationalVersion>
-    <AssemblyVersion>26.7.2.1122</AssemblyVersion>
-    <FileVersion>26.7.2.1122</FileVersion>
+    <Deterministic>true</Deterministic>
+    <BuildVersion>$([System.DateTime]::Now.ToString('yy.M.d.HHmm'))</BuildVersion>
+    <Version>$(BuildVersion)</Version>
+    <InformationalVersion>$(BuildVersion)</InformationalVersion>
+    <AssemblyVersion>$(BuildVersion)</AssemblyVersion>
+    <FileVersion>$(BuildVersion)</FileVersion>
+    <!-- Fail fast when output files are locked (no retry loop). -->
+    <CopyRetryCount>0</CopyRetryCount>
+    <CopyRetryDelayMilliseconds>0</CopyRetryDelayMilliseconds>
+    <!-- Enabled: successful Release builds auto-commit tracked version artifacts. -->
+    <AutoCommitVersionOnRelease>True</AutoCommitVersionOnRelease>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -85,7 +92,32 @@
           Condition="'$(RcExeFirst)' != ''" />
   </Target>
 
-  <Target Name="CopyVersionedPluginArtifact" AfterTargets="Build">
+  <Target Name="GenerateBuildVersionInfo" BeforeTargets="CoreCompile">
+    <PropertyGroup>
+      <GeneratedVersionInfoFile>$(IntermediateOutputPath)vObjectPropertiesPlus.GeneratedVersionInfo.cs</GeneratedVersionInfoFile>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <GeneratedVersionInfoLines Include="[assembly: System.Reflection.AssemblyVersion(&quot;$(AssemblyVersion)&quot;)]" />
+      <GeneratedVersionInfoLines Include="[assembly: System.Reflection.AssemblyFileVersion(&quot;$(FileVersion)&quot;)]" />
+      <GeneratedVersionInfoLines Include="[assembly: System.Reflection.AssemblyInformationalVersion(&quot;$(InformationalVersion)&quot;)]" />
+    </ItemGroup>
+
+    <WriteLinesToFile
+      File="$(GeneratedVersionInfoFile)"
+      Lines="@(GeneratedVersionInfoLines)"
+      Overwrite="true"
+      Encoding="UTF-8" />
+
+    <ItemGroup>
+      <Compile Include="$(GeneratedVersionInfoFile)" />
+    </ItemGroup>
+
+    <Message Importance="high" Text="vObjectPropertiesPlus build version: $(BuildVersion)" />
+  </Target>
+
+  <!-- Create a timestamped snapshot of the DLL after every successful Release build. -->
+  <Target Name="CopyVersionedPluginArtifact" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
     <PropertyGroup>
       <ArtifactTimestamp>$([System.DateTime]::Now.ToString('yy.MM.dd.HHmmss'))</ArtifactTimestamp>
       <BackupsDir>$(TargetDir)backups\</BackupsDir>
@@ -95,5 +127,107 @@
       SourceFiles="$(TargetPath)"
       DestinationFiles="$(BackupsDir)$(AssemblyName).$(ArtifactTimestamp)$(TargetExt)"
       SkipUnchangedFiles="true" />
+  </Target>
+
+  <!-- Commit updated version metadata and release plugin binary after successful Release builds. -->
+  <Target Name="CommitReleaseVersion" AfterTargets="CopyVersionedPluginArtifact" Condition="'$(Configuration)' == 'Release' and '$(AutoCommitVersionOnRelease)' == 'true' and !Exists('$(MSBuildProjectDirectory)\.git\vObjectPropertiesPlus-hold-commits')">
+    <PropertyGroup>
+      <ShortTagVersion>$([System.Text.RegularExpressions.Regex]::Match('$(Version)', '^\d{2}\.\d{2}\.\d{2}').Value)</ShortTagVersion>
+    </PropertyGroup>
+
+    <Exec
+      Command="git -C &quot;$(MSBuildProjectDirectory)&quot; add -A -- ."
+      IgnoreExitCode="true" />
+
+    <Exec
+      Command="git -C &quot;$(MSBuildProjectDirectory)&quot; diff --cached --quiet -- ."
+      IgnoreExitCode="true">
+      <Output TaskParameter="ExitCode" PropertyName="VersionCommitDiffExitCode" />
+    </Exec>
+
+    <Exec
+      Command="git -C &quot;$(MSBuildProjectDirectory)&quot; diff --cached --quiet -- &quot;bin/Release/net7.0-windows/vObjectPropertiesPlus.dll&quot;"
+      IgnoreExitCode="true"
+      Condition="'$(VersionCommitDiffExitCode)' != '0'">
+      <Output TaskParameter="ExitCode" PropertyName="VersionDllDiffExitCode" />
+    </Exec>
+
+    <!-- If a pending message was written before this build, use it directly. -->
+    <PropertyGroup Condition="'$(VersionCommitDiffExitCode)' != '0'">
+      <PendingMessageFile>$(MSBuildProjectDirectory)\.git\vObjectPropertiesPlus-pending-message.txt</PendingMessageFile>
+      <HasPendingMessage Condition="Exists('$(PendingMessageFile)')">true</HasPendingMessage>
+    </PropertyGroup>
+
+    <Error
+      Condition="'$(VersionCommitDiffExitCode)' != '0' and '$(HasPendingMessage)' != 'true'"
+      Text="Missing $(MSBuildProjectDirectory)\.git\vObjectPropertiesPlus-pending-message.txt. Commit message required before committing version changes." />
+
+    <Exec
+      Command="powershell -NoProfile -ExecutionPolicy Bypass -Command &quot;$body=[System.IO.File]::ReadAllText('$(PendingMessageFile)').Trim(); $msg='$(Version): ' + $body; $enc=New-Object System.Text.UTF8Encoding($false); [System.IO.File]::WriteAllText('$(MSBuildProjectDirectory)\.git\vObjectPropertiesPlus-autocommit-message.txt',$msg,$enc)&quot;"
+      Condition="'$(HasPendingMessage)' == 'true' and '$(VersionCommitDiffExitCode)' != '0'"
+      IgnoreExitCode="true" />
+
+    <Delete
+      Files="$(PendingMessageFile)"
+      Condition="'$(HasPendingMessage)' == 'true' and '$(VersionCommitDiffExitCode)' != '0'" />
+
+    <PropertyGroup Condition="'$(HasPendingMessage)' == 'true' and '$(VersionCommitDiffExitCode)' != '0'">
+      <VersionCommitMessageExitCode>0</VersionCommitMessageExitCode>
+    </PropertyGroup>
+
+    <Exec
+      Command="git -C &quot;$(MSBuildProjectDirectory)&quot; commit -F &quot;.git/vObjectPropertiesPlus-autocommit-message.txt&quot;"
+      IgnoreExitCode="true"
+      Condition="'$(VersionCommitDiffExitCode)' != '0' and '$(VersionCommitMessageExitCode)' == '0'">
+      <Output TaskParameter="ExitCode" PropertyName="VersionCommitExitCode" />
+    </Exec>
+
+    <Exec
+      Command="git -C &quot;$(MSBuildProjectDirectory)&quot; rev-parse -q --verify &quot;refs/tags/$(ShortTagVersion)&quot;"
+      IgnoreExitCode="true"
+      Condition="'$(VersionCommitDiffExitCode)' != '0' and '$(VersionCommitExitCode)' == '0' and '$(ShortTagVersion)' != ''">
+      <Output TaskParameter="ExitCode" PropertyName="ShortTagExistsExitCode" />
+    </Exec>
+
+    <Exec
+      Command="git -C &quot;$(MSBuildProjectDirectory)&quot; tag &quot;$(ShortTagVersion)&quot;"
+      IgnoreExitCode="true"
+      Condition="'$(VersionCommitDiffExitCode)' != '0' and '$(VersionCommitExitCode)' == '0' and '$(ShortTagVersion)' != '' and '$(ShortTagExistsExistsExitCode)' != '0'">
+      <Output TaskParameter="ExitCode" PropertyName="ShortTagCreateExitCode" />
+    </Exec>
+
+    <Message
+      Importance="high"
+      Text="vObjectPropertiesPlus version commit created: $(Version)"
+      Condition="'$(VersionCommitDiffExitCode)' != '0' and '$(VersionCommitExitCode)' == '0'" />
+
+    <Message
+      Importance="high"
+      Text="vObjectPropertiesPlus version commit skipped (release DLL unchanged or locked)."
+      Condition="'$(VersionCommitDiffExitCode)' != '0' and '$(VersionCommitExitCode)' != '0' and '$(VersionDllDiffExitCode)' == '0'" />
+
+    <Message
+      Importance="high"
+      Text="vObjectPropertiesPlus version commit skipped (failed to build auto commit message)."
+      Condition="'$(VersionCommitDiffExitCode)' != '0' and '$(VersionCommitMessageExitCode)' != '0'" />
+
+    <Message
+      Importance="high"
+      Text="vObjectPropertiesPlus version commit skipped (git commit failed; check git identity, branch, or repo state)."
+      Condition="'$(VersionCommitDiffExitCode)' != '0' and '$(VersionCommitMessageExitCode)' == '0' and '$(VersionCommitExitCode)' != '0'" />
+
+    <Message
+      Importance="high"
+      Text="vObjectPropertiesPlus version commit skipped (no staged changes)."
+      Condition="'$(VersionCommitDiffExitCode)' == '0'" />
+  </Target>
+
+  <Target Name="ShowOutputVersionAfterBuild" AfterTargets="Build" Condition="Exists('$(TargetPath)')">
+    <GetAssemblyIdentity AssemblyFiles="$(TargetPath)">
+      <Output TaskParameter="Assemblies" ItemName="BuiltAssembly" />
+    </GetAssemblyIdentity>
+
+    <Message Importance="high" Text="Built output: $(TargetPath)" />
+    <Message Importance="high" Text="Built version: %(BuiltAssembly.Version)" />
   </Target>
 </Project>

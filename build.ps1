@@ -1,11 +1,5 @@
 Set-Location d:\github\rhino\vObjectPropertiesPlus
 
-# Bump CalVer in csproj and AssemblyInfo
-$cur = (Select-String -Path vObjectPropertiesPlus.csproj -Pattern '<Version>([^<]+)').Matches[0].Groups[1].Value
-$v   = (Get-Date).ToString('yy.M.d.HHmm')
-(Get-Content vObjectPropertiesPlus.csproj)   -replace [regex]::Escape($cur), $v | Set-Content vObjectPropertiesPlus.csproj
-(Get-Content Properties\AssemblyInfo.cs) -replace [regex]::Escape($cur), $v | Set-Content Properties\AssemblyInfo.cs
-
 $pendingFile = '.git\vObjectPropertiesPlus-pending-message.txt'
 
 # Auto-generate pending message from diff when not provided
@@ -40,34 +34,4 @@ if (-not (Test-Path $pendingFile)) {
     Write-Host "Created pending message file: $pendingFile -> $summary" -ForegroundColor Green
 }
 
-# Build
-$dllPath = 'bin\Release\net7.0-windows\vObjectPropertiesPlus.dll'
-$dllTimeBefore = if (Test-Path $dllPath) { (Get-Item $dllPath).LastWriteTime } else { $null }
-
-$buildOutput = dotnet build vObjectPropertiesPlus.csproj -c Release --no-incremental 2>&1
-$buildExitCode = $LASTEXITCODE
-if ($buildExitCode -ne 0) {
-    if ($buildOutput -match 'being used by another process' -or $buildOutput -match 'cannot access the file' -or $buildOutput -match 'Cannot write file') {
-        Write-Host "WARNING: vObjectPropertiesPlus build reported a locked DLL; prebuild is considered successful and the pending commit message file has already been created." -ForegroundColor Yellow
-    } else {
-        Write-Host $buildOutput
-        exit $buildExitCode
-    }
-}
-
-# Commit only when build succeeded and DLL was actually updated
-$dllTimeAfter = if (Test-Path $dllPath) { (Get-Item $dllPath).LastWriteTime } else { $null }
-$dllUpdated = ($dllTimeAfter -ne $null) -and ($dllTimeAfter -ne $dllTimeBefore)
-
-if ($dllUpdated) {
-    $pendingMsg = (Get-Content $pendingFile -Raw -ErrorAction SilentlyContinue) -replace "`r`n|`r|`n", ' '
-    if ($pendingMsg) {
-        git add -A
-        git add -f $dllPath
-        git commit -m "${v}: $pendingMsg"
-        Remove-Item $pendingFile -ErrorAction SilentlyContinue
-        Write-Host "Committed: ${v}: $pendingMsg" -ForegroundColor Green
-    }
-} else {
-    Write-Host "DLL not updated (build locked or unchanged) - commit deferred." -ForegroundColor Yellow
-}
+dotnet build vObjectPropertiesPlus.csproj -c Release --no-incremental
