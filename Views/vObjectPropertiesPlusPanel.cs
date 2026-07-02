@@ -185,7 +185,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _textFontDrop = new DropDown { Height = RowHeight, Width = ValueWidth };
     foreach (var ff in System.Drawing.FontFamily.Families.OrderBy(f => f.Name))
       _textFontDrop.Items.Add(new ListItem { Text = ff.Name, Key = ff.Name });
-    _textHeightStepper = NewNumericStepper(0.0001, 100000, 0.1, 4);
+    _textHeightStepper = NewNumericStepper(0, 100000, 0.1, 4);
     _textHeightStepper.Width = InfoNumericValueWidth;
     _textHeightUnitDrop = NewUnitDropDown();
     SetUnitDropOptions(_textHeightUnitDrop);
@@ -5195,9 +5195,9 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     }
     if (changed)
     {
-      _doc.Views.Redraw();
       if (refresh)
         RefreshFromCurrentSelection();
+      _doc.Views.Redraw();
     }
   }
 
@@ -5224,7 +5224,12 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
       var modelUnits = doc?.ModelUnitSystem ?? UnitSystem.None;
       var units = GetSelectedUnitSystem(_textHeightUnitDrop, doc);
-      var heights = texts.Select(t => ConvertLength(GetEffectiveTextDimStyle(t, doc).TextHeight, modelUnits, units)).ToList();
+      // GetEffectiveTextDimStyle returns the style's base height, not the per-object TextHeight override.
+      var heights = texts.Select(t => {
+        double h = t.TextHeight;
+        if (h <= 0) h = GetEffectiveTextDimStyle(t, doc).TextHeight;
+        return ConvertLength(h, modelUnits, units);
+      }).ToList();
       bool heightsSame = heights.Count > 0 && heights.All(h => RhinoMath.EpsilonEquals(h, heights[0], RhinoMath.SqrtEpsilon));
       _textHeightStepper.Value = heightsSame ? heights[0] : 0;
 
