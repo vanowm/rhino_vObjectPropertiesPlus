@@ -5311,7 +5311,9 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     var modelUnits = _doc.ModelUnitSystem;
     var units = GetSelectedUnitSystem(_textHeightUnitDrop, _doc);
     double hModel = ConvertLength(h, units, modelUnits);
-    ApplyToTextObjects(te => { te.TextHeight = Math.Max(hModel, RhinoMath.ZeroTolerance); });
+    // refresh:false — ValueChanged fires on every keystroke; refreshing would read back the
+    // document default and reset the stepper before multi-digit input can complete.
+    ApplyToTextObjects(te => { te.TextHeight = Math.Max(hModel, RhinoMath.ZeroTolerance); }, refresh: false);
   }
 
   private void ApplyTextHAlignment(TextHorizontalAlignment alignment)
