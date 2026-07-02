@@ -1222,10 +1222,6 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _curveMetricLabel.Visible = true;
     _curveMetricBox.Visible = true;
     _curveMetricUnitDrop.Visible = true;
-    SetControlEnabled(_curveMetricUnitDrop, false);
-    SetControlEnabled(_totalLengthUnitDrop, false);
-    SetControlEnabled(_infoFormatDrop, false);
-    SetControlEnabled(_infoPrecisionDrop, false);
     _radiusNameLabel.Text = "Radius";
     _diameterNameLabel.Text = "Diameter";
     SetEditableTextValue(_curveMetricBox, "-");
@@ -1249,7 +1245,6 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _textFontDrop.SelectedIndex = -1;
     SetControlEnabled(_textFontDrop, false);
     SetControlEnabled(_textHeightStepper, false);
-    SetControlEnabled(_textHeightUnitDrop, false);
     _textContentArea.Text = "";
     SetControlEnabled(_textContentArea, false);
     _textContentArea.Font = new Eto.Drawing.Font(SystemFont.Default, 9f);
