@@ -4098,8 +4098,19 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       SetDropFromDocOrModel(doc, _radiusUnitDrop, "Radius");
       SetDropFromDocOrModel(doc, _diameterUnitDrop, "Diameter");
       SetDropFromDocOrModel(doc, _totalLengthUnitDrop, "TotalLength");
-      SelectDropByText(_infoFormatDrop, GetWorkspaceFormatToken(doc));
-      SetPrecisionDropOptions(_infoPrecisionDrop, GetSelectedPrecisionKindToken(), GetInfoPrecisionBitsFromDocOrModel(doc));
+      // Prefer saved doc pref so user's choice survives DocumentPropertiesChanged re-init
+      string? savedFormat = GetDocUnitPref(doc, "Format");
+      string formatToken = !string.IsNullOrWhiteSpace(savedFormat)
+        ? savedFormat.Trim().ToLowerInvariant()
+        : GetWorkspaceFormatToken(doc);
+      SelectDropByText(_infoFormatDrop, formatToken);
+
+      string? savedPrecision = GetDocUnitPref(doc, "Precision");
+      int precisionBits = !string.IsNullOrWhiteSpace(savedPrecision)
+        && int.TryParse(savedPrecision, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedBits)
+        ? Math.Max(0, Math.Min(8, parsedBits))
+        : GetInfoPrecisionBitsFromDocOrModel(doc);
+      SetPrecisionDropOptions(_infoPrecisionDrop, GetSelectedPrecisionKindToken(), precisionBits);
     }
     finally
     {
@@ -5200,9 +5211,17 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     }
     if (changed)
     {
+      // Refresh the conduit reference before Redraw so DrawOverlay never
+      // touches a stale RhinoObject whose native C++ peer may have been freed
+      // by the Replace above (second replace in the same focus session).
+      if (_focusHighlightConduit.Enabled && _focusedObjectId != Guid.Empty)
+      {
+        var fresh = _doc.Objects.FindId(_focusedObjectId);
+        if (fresh != null) _focusHighlightConduit.SetObject(fresh);
+      }
+      _doc.Views.Redraw();
       if (refresh)
         RefreshFromCurrentSelection();
-      _doc.Views.Redraw();
     }
   }
 
