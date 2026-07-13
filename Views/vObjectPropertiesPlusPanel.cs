@@ -459,7 +459,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     RhinoDoc.SelectObjects      += (_, e) => { vObjectPropertiesPlusPlugIn.DebugLog("Event: SelectObjects"); RefreshFromDoc(e.Document); };
     RhinoDoc.DeselectObjects    += (_, e) => { vObjectPropertiesPlusPlugIn.DebugLog("Event: DeselectObjects"); RefreshFromDoc(e.Document); };
     RhinoDoc.DeselectAllObjects += (_, e) => { vObjectPropertiesPlusPlugIn.DebugLog("Event: DeselectAllObjects"); RefreshFromDoc(e.Document); };
-    RhinoDoc.ModifyObjectAttributes += (_, e) => { if (e.RhinoObject?.IsSelected(false) == 1) RefreshFromDoc(e.Document); };
+    RhinoDoc.ModifyObjectAttributes += (_, e) => OnObjectAttributesModified(e.Document, e.RhinoObject);
     RhinoDoc.EndOpenDocument          += (_, e) => { _unitPrefsLoadedDocSerial = 0; RefreshFromDoc(e.Document); };
     RhinoDoc.DocumentPropertiesChanged += (_, e) => { _unitPrefsLoadedDocSerial = 0; RefreshFromDoc(e.Document); };
 
@@ -514,6 +514,43 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     
     vObjectPropertiesPlusPlugIn.DebugLog($"DoRefreshFromDoc: Final selection count = {selected.Count}");
     UpdateFromSelection(doc, selected);
+  }
+
+  private void OnObjectAttributesModified(RhinoDoc doc, RhinoObject? changedObject)
+  {
+    if (ShouldRefreshForAttributeChange(changedObject))
+    {
+      vObjectPropertiesPlusPlugIn.DebugLog("Event: ModifyObjectAttributes");
+      RefreshFromDoc(doc);
+    }
+  }
+
+  private bool ShouldRefreshForAttributeChange(RhinoObject? changedObject)
+  {
+    if (changedObject == null)
+      return _selectedObjectIds.Count > 0 || _allSelectedObjects.Count > 0 || _focusedObjectId != Guid.Empty;
+
+    if (IsTrackedSelectionObject(changedObject.Id))
+      return true;
+
+    try
+    {
+      return changedObject.IsSelected(true) > 0;
+    }
+    catch
+    {
+      return false;
+    }
+  }
+
+  private bool IsTrackedSelectionObject(Guid objectId)
+  {
+    if (objectId == Guid.Empty)
+      return false;
+
+    return objectId == _focusedObjectId
+      || _selectedObjectIds.Contains(objectId)
+      || _allSelectedObjects.Any(o => o.Id == objectId);
   }
 
   private void RefreshForSegmentSelection(List<CurveInfo> segments, int focusedSegmentIndex = -1)
@@ -669,7 +706,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _doc = doc;
     EnsureDocUnitPrefsLoaded(doc);
 
-    var objectList = objects?.ToList() ?? new List<RhinoObject>();
+    var objectList = FreshObjectsFromDoc(doc, objects);
     
     // Update Match and Details button states based on selection
     bool hasSelection = objectList.Count > 0;
@@ -695,6 +732,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
         && objectList.All(o => _allSelectedObjects.Any(a => a.Id == o.Id));
       if (isSameSelectionSet)
       {
+        RefreshTrackedSelectionReferences(objectList);
+
         if (isSegmentFocus)
         {
           // Restore segment focus
@@ -1885,6 +1924,47 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
     var objs = SelectedRhinoObjects().ToList();
     UpdateFromSelection(_doc, objs);
+  }
+
+  private static List<RhinoObject> FreshObjectsFromDoc(RhinoDoc? doc, IEnumerable<RhinoObject>? objects)
+  {
+    var objectList = objects?.Where(o => o != null).ToList() ?? new List<RhinoObject>();
+    if (doc == null || objectList.Count == 0)
+      return objectList;
+
+    var freshObjects = new List<RhinoObject>(objectList.Count);
+    foreach (var obj in objectList)
+    {
+      var fresh = doc.Objects.FindId(obj.Id);
+      freshObjects.Add(fresh ?? obj);
+    }
+
+    return freshObjects;
+  }
+
+  private void RefreshTrackedSelectionReferences(IReadOnlyList<RhinoObject> freshObjects)
+  {
+    if (freshObjects.Count == 0)
+      return;
+
+    var byId = freshObjects
+      .GroupBy(o => o.Id)
+      .ToDictionary(g => g.Key, g => g.First());
+
+    for (int i = 0; i < _allSelectedObjects.Count; i++)
+    {
+      if (byId.TryGetValue(_allSelectedObjects[i].Id, out var fresh))
+        _allSelectedObjects[i] = fresh;
+    }
+
+    foreach (var cluster in _dropdownClusters)
+    {
+      for (int i = 0; i < cluster.Count; i++)
+      {
+        if (byId.TryGetValue(cluster[i].Id, out var fresh))
+          cluster[i] = fresh;
+      }
+    }
   }
 
   private void RunMatchProperties()
