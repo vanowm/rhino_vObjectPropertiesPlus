@@ -134,6 +134,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private int _focusedSegmentIndex = -1;
   private bool _isUpdatingUi;
   private bool _textHeightUserEditing;
+  private bool _textContentUserEditing;
+  private bool _textContentDirty;
   private long _lastUserEditMs;
   private uint _unitPrefsLoadedDocSerial;
 
@@ -264,7 +266,9 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _textItalicBtn.Click += (_, _) => { if (!_isUpdatingUi) ApplyTextItalic(); };
     _textUnderlineBtn.Click += (_, _) => { if (!_isUpdatingUi) ApplyTextUnderline(); };
     _textContentTimer.Elapsed += (_, _) => { _textContentTimer.Stop(); ApplyTextContent(); };
-    _textContentArea.TextChanged += (_, _) => { if (!_isUpdatingUi) { _textContentTimer.Stop(); _textContentTimer.Start(); } };
+    _textContentArea.GotFocus += (_, _) => _textContentUserEditing = true;
+    _textContentArea.LostFocus += (_, _) => OnTextContentLostFocus();
+    _textContentArea.TextChanged += (_, _) => OnTextContentChanged();
 
     _layerDrop.SelectedIndexChanged += (_, _) => ApplyLayer();
     _displayColorDrop.SelectedIndexChanged += (_, _) => ApplyDisplayColorSource();
@@ -553,6 +557,21 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       || _allSelectedObjects.Any(o => o.Id == objectId);
   }
 
+  private bool SelectionChanged(IReadOnlyList<RhinoObject> objectList)
+  {
+    if (objectList.Count != _selectedObjectIds.Count)
+      return true;
+
+    return objectList.Any(o => !_selectedObjectIds.Contains(o.Id));
+  }
+
+  private void ResetTextContentEditState()
+  {
+    _textContentTimer.Stop();
+    _textContentUserEditing = false;
+    _textContentDirty = false;
+  }
+
   private void RefreshForSegmentSelection(List<CurveInfo> segments, int focusedSegmentIndex = -1)
   {
     if (_doc == null || segments.Count == 0)
@@ -722,6 +741,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       && objectList[0].Id == _focusedObjectId;
     
     bool isSegmentFocus = _focusedSegmentIndex >= 0;
+    bool selectionChanged = SelectionChanged(objectList);
 
     // If the incoming selection set matches the recorded full selection, this is a
     // Rhino-internal refresh (e.g. after ModifyAttributes / geometry replace), not a
@@ -762,6 +782,9 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
     if (!isFocusDrillDown)
     {
+      if (selectionChanged)
+        ResetTextContentEditState();
+
       bool wasHighlighting = _focusHighlightConduit.Enabled;
       _dropdownClusters = BuildDropdownClusters(objectList);
       _allSelectedObjects = _dropdownClusters.SelectMany(c => c).ToList();
@@ -5373,7 +5396,12 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       }
 
       var contents = texts.Select(t => t.PlainText ?? "").Distinct().ToList();
-      SetTextAreaTextPreservingSelection(_textContentArea, contents.Count == 1 ? contents[0] : "");
+      string contentText = contents.Count == 1 ? contents[0] : "";
+      if (TextContentEquivalent(_textContentArea.Text ?? "", contentText))
+        _textContentDirty = false;
+
+      if (!_textContentDirty || !_textContentUserEditing)
+        SetTextAreaTextPreservingSelection(_textContentArea, contentText);
     }
     finally
     {
@@ -5402,6 +5430,39 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
     textArea.Selection = new Range<int>(selectionStart, selectionEnd);
     textArea.CaretIndex = Math.Min(Math.Max(oldCaret, 0), maxIndex);
+  }
+
+  private void OnTextContentChanged()
+  {
+    if (_isUpdatingUi)
+      return;
+
+    _lastUserEditMs = System.Environment.TickCount64;
+    _textContentUserEditing = true;
+    _textContentDirty = true;
+    _textContentTimer.Stop();
+    _textContentTimer.Start();
+  }
+
+  private void OnTextContentLostFocus()
+  {
+    if (_isUpdatingUi)
+      return;
+
+    _textContentTimer.Stop();
+    ApplyTextContent();
+    _textContentUserEditing = false;
+    _textContentDirty = false;
+  }
+
+  private static bool TextContentEquivalent(string a, string b)
+  {
+    return string.Equals(NormalizeTextLineEndings(a), NormalizeTextLineEndings(b), StringComparison.Ordinal);
+  }
+
+  private static string NormalizeTextLineEndings(string text)
+  {
+    return text.Replace("\r\n", "\n").Replace('\r', '\n');
   }
 
   private void ApplyTextFont()
