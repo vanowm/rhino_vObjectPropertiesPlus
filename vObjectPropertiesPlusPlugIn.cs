@@ -1,5 +1,4 @@
-﻿using System;
-using System.IO;
+using System;
 using System.Runtime.Versioning;
 using Rhino;
 using Rhino.PlugIns;
@@ -11,8 +10,6 @@ namespace vObjectPropertiesPlus;
 [System.Runtime.InteropServices.Guid("2E0E8488-399B-4D87-B845-8A486911F808")]
 public class vObjectPropertiesPlusPlugIn : PlugIn
 {
-  private static readonly object LogLock = new();
-  private static bool _isFirstLog = true;
   private static System.Drawing.Icon? _cachedPanelIcon;
   private static System.Drawing.Bitmap? _iconBitmap; // Keep bitmap alive for icon handle
 
@@ -35,21 +32,22 @@ public class vObjectPropertiesPlusPlugIn : PlugIn
                             : null)
                          ?? asm.GetName().Version?.ToString()
                          ?? "unknown";
-    DebugLog($"OnLoad: asmLocation='{asmLocation}' versionText='{versionText}'");
+    Log.Initialize();
+    Log.Write($"startup  rhino={RhinoApp.Version}  version={versionText}  dll={asmLocation}");
 
     RhinoApp.WriteLine($"{LocalPlugInName} v{versionText}");
-    DebugLog("OnLoad: plugin loaded.");
+    Log.Write("OnLoad: plugin loaded.");
 
     var panelGuid = typeof(Views.vObjectPropertiesPlusPanel).GUID;
-    DebugLog($"OnLoad: registering panel GUID={panelGuid}");
+    Log.Write($"OnLoad: registering panel GUID={panelGuid}");
     try
     {
       Panels.RegisterPanel(this, typeof(Views.vObjectPropertiesPlusPanel), "Properties+", LoadPanelIcon(), PanelType.PerDoc);
-      DebugLog("OnLoad: RegisterPanel succeeded with PanelType.PerDoc");
+      Log.Write("OnLoad: RegisterPanel succeeded with PanelType.PerDoc");
     }
     catch (Exception ex)
     {
-      DebugLog($"OnLoad: RegisterPanel FAILED: {ex}");
+      Log.Write($"OnLoad: RegisterPanel FAILED: {ex}");
     }
 
     return LoadReturnCode.Success;
@@ -69,9 +67,9 @@ public class vObjectPropertiesPlusPlugIn : PlugIn
       {
         if (stream != null)
         {
-          DebugLog("LoadPanelIcon: loading from embedded .ico resource");
+          Log.Write("LoadPanelIcon: loading from embedded .ico resource");
           _cachedPanelIcon = new System.Drawing.Icon(stream);
-          DebugLog($"LoadPanelIcon: loaded icon {_cachedPanelIcon.Width}x{_cachedPanelIcon.Height}");
+          Log.Write($"LoadPanelIcon: loaded icon {_cachedPanelIcon.Width}x{_cachedPanelIcon.Height}");
           return _cachedPanelIcon;
         }
       }
@@ -81,57 +79,22 @@ public class vObjectPropertiesPlusPlugIn : PlugIn
       {
         if (stream != null)
         {
-          DebugLog("LoadPanelIcon: loading from embedded .png resource");
+          Log.Write("LoadPanelIcon: loading from embedded .png resource");
           _iconBitmap = new System.Drawing.Bitmap(stream);
-          DebugLog($"LoadPanelIcon: loaded bitmap {_iconBitmap.Width}x{_iconBitmap.Height}");
+          Log.Write($"LoadPanelIcon: loaded bitmap {_iconBitmap.Width}x{_iconBitmap.Height}");
           _cachedPanelIcon = System.Drawing.Icon.FromHandle(_iconBitmap.GetHicon());
           return _cachedPanelIcon;
         }
       }
       
-      DebugLog("LoadPanelIcon: no embedded icon resource found, using system icon");
+      Log.Write("LoadPanelIcon: no embedded icon resource found, using system icon");
     }
     catch (Exception ex)
     {
-      DebugLog($"LoadPanelIcon: exception: {ex.Message}");
+      Log.Write($"LoadPanelIcon: exception: {ex.Message}");
     }
     
     _cachedPanelIcon = System.Drawing.SystemIcons.Application;
     return _cachedPanelIcon;
-  }
-
-  internal static void DebugLog(string message)
-  {
-    try
-    {
-      string assemblyDir = Path.GetDirectoryName(typeof(vObjectPropertiesPlusPlugIn).Assembly.Location) ?? AppContext.BaseDirectory;
-      string logsDir = Path.Combine(assemblyDir, "logs");
-      try
-      {
-        Directory.CreateDirectory(logsDir);
-      }
-      catch
-      {
-        logsDir = assemblyDir;
-      }
-
-      string logPath = Path.Combine(logsDir, "vObjectPropertiesPlus_debug.log");
-      string line = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff") + " | " + message + System.Environment.NewLine;
-      lock (LogLock)
-      {
-        if (_isFirstLog)
-        {
-          File.WriteAllText(logPath, line); // Clear log on first write
-          _isFirstLog = false;
-        }
-        else
-        {
-          File.AppendAllText(logPath, line);
-        }
-      }
-    }
-    catch
-    {
-    }
   }
 }

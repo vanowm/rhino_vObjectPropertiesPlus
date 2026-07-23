@@ -460,9 +460,9 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       0);
 
     Load += (_, _) => { var d = RhinoDoc.ActiveDoc; if (d != null) RefreshFromDoc(d); };
-    RhinoDoc.SelectObjects      += (_, e) => { vObjectPropertiesPlusPlugIn.DebugLog("Event: SelectObjects"); RefreshFromDoc(e.Document); };
-    RhinoDoc.DeselectObjects    += (_, e) => { vObjectPropertiesPlusPlugIn.DebugLog("Event: DeselectObjects"); RefreshFromDoc(e.Document); };
-    RhinoDoc.DeselectAllObjects += (_, e) => { vObjectPropertiesPlusPlugIn.DebugLog("Event: DeselectAllObjects"); RefreshFromDoc(e.Document); };
+    RhinoDoc.SelectObjects      += (_, e) => { Log.Write("Event: SelectObjects"); RefreshFromDoc(e.Document); };
+    RhinoDoc.DeselectObjects    += (_, e) => { Log.Write("Event: DeselectObjects"); RefreshFromDoc(e.Document); };
+    RhinoDoc.DeselectAllObjects += (_, e) => { Log.Write("Event: DeselectAllObjects"); RefreshFromDoc(e.Document); };
     RhinoDoc.ModifyObjectAttributes += (_, e) => OnObjectAttributesModified(e.Document, e.RhinoObject);
     RhinoDoc.EndOpenDocument          += (_, e) => { _unitPrefsLoadedDocSerial = 0; RefreshFromDoc(e.Document); };
     RhinoDoc.DocumentPropertiesChanged += (_, e) => { _unitPrefsLoadedDocSerial = 0; RefreshFromDoc(e.Document); };
@@ -493,7 +493,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private void DoRefreshFromDoc(RhinoDoc doc)
   {
     var selected = doc.Objects.GetSelectedObjects(false, false).ToList();
-    vObjectPropertiesPlusPlugIn.DebugLog($"DoRefreshFromDoc: GetSelectedObjects returned {selected.Count} objects");
+    Log.Write($"DoRefreshFromDoc: GetSelectedObjects returned {selected.Count} objects");
     
     // If no normal selection, check for objects with selected subobjects (segments)
     if (selected.Count == 0)
@@ -510,13 +510,13 @@ public sealed class vObjectPropertiesPlusPanel : Panel
         {
           subObjCount++;
           selected.Add(obj);
-          vObjectPropertiesPlusPlugIn.DebugLog($"DoRefreshFromDoc: Found object with {subObjects.Length} selected subobjects: {obj.Id}");
+          Log.Write($"DoRefreshFromDoc: Found object with {subObjects.Length} selected subobjects: {obj.Id}");
         }
       }
-      vObjectPropertiesPlusPlugIn.DebugLog($"DoRefreshFromDoc: Checked all objects, found {subObjCount} with selected subobjects");
+      Log.Write($"DoRefreshFromDoc: Checked all objects, found {subObjCount} with selected subobjects");
     }
     
-    vObjectPropertiesPlusPlugIn.DebugLog($"DoRefreshFromDoc: Final selection count = {selected.Count}");
+    Log.Write($"DoRefreshFromDoc: Final selection count = {selected.Count}");
     UpdateFromSelection(doc, selected);
   }
 
@@ -524,7 +524,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   {
     if (ShouldRefreshForAttributeChange(changedObject))
     {
-      vObjectPropertiesPlusPlugIn.DebugLog("Event: ModifyObjectAttributes");
+      Log.Write("Event: ModifyObjectAttributes");
       RefreshFromDoc(doc);
     }
   }
@@ -650,8 +650,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
         ? segments.Where(s => s.SegmentIndex == focusedSegmentIndex && s.ParentObject.Id == _focusedObjectId).ToList()
         : segments;
       
-      vObjectPropertiesPlusPlugIn.DebugLog($"RefreshForSegmentSelection: focusedSegmentIndex={focusedSegmentIndex}, _focusedObjectId={_focusedObjectId}");
-      vObjectPropertiesPlusPlugIn.DebugLog($"RefreshForSegmentSelection: segments.Count={segments.Count}, segmentsToMeasure.Count={segmentsToMeasure.Count}");
+      Log.Write($"RefreshForSegmentSelection: focusedSegmentIndex={focusedSegmentIndex}, _focusedObjectId={_focusedObjectId}");
+      Log.Write($"RefreshForSegmentSelection: segments.Count={segments.Count}, segmentsToMeasure.Count={segmentsToMeasure.Count}");
       
       foreach (var curveInfo in segmentsToMeasure)
       {
@@ -660,7 +660,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
         {
           double len = curve.GetLength();
           totalLength += len;
-          vObjectPropertiesPlusPlugIn.DebugLog($"RefreshForSegmentSelection: segment index={curveInfo.SegmentIndex}, parentId={curveInfo.ParentObject.Id}, length={len}");
+          Log.Write($"RefreshForSegmentSelection: segment index={curveInfo.SegmentIndex}, parentId={curveInfo.ParentObject.Id}, length={len}");
           
           if (curve is ArcCurve arc)
           {
@@ -673,7 +673,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
         }
       }
       
-      vObjectPropertiesPlusPlugIn.DebugLog($"RefreshForSegmentSelection: totalLength={totalLength}");
+      Log.Write($"RefreshForSegmentSelection: totalLength={totalLength}");
       
       // Get current unit systems from dropdowns
       UnitSystem totalLengthUnits = GetSelectedUnitSystem(_totalLengthUnitDrop, _doc);
@@ -684,7 +684,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       _totalLengthBox.Text = FormatInfoNumber(ConvertLength(totalLength, modelUnits, totalLengthUnits), _totalLengthUnitDrop);
       SetEditableTextValue(_curveMetricBox, FormatInfoNumber(ConvertLength(totalLength, modelUnits, curveMetricUnits), _curveMetricUnitDrop));
       
-      vObjectPropertiesPlusPlugIn.DebugLog($"RefreshForSegmentSelection: _totalLengthBox.Text={_totalLengthBox.Text}, _curveMetricBox.Text={_curveMetricBox.Text}");
+      Log.Write($"RefreshForSegmentSelection: _totalLengthBox.Text={_totalLengthBox.Text}, _curveMetricBox.Text={_curveMetricBox.Text}");
       
       // Show radius/diameter only for arc/circle segments
       if (radii.Count > 0)
@@ -721,7 +721,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
   public void UpdateFromSelection(RhinoDoc? doc, IEnumerable<RhinoObject> objects)
   {
-    vObjectPropertiesPlusPlugIn.DebugLog($"UpdateFromSelection: called, _focusedSegmentIndex={_focusedSegmentIndex}, _focusedObjectId={_focusedObjectId}");
+    Log.Write($"UpdateFromSelection: called, _focusedSegmentIndex={_focusedSegmentIndex}, _focusedObjectId={_focusedObjectId}");
     _doc = doc;
     EnsureDocUnitPrefsLoaded(doc);
 
@@ -1037,7 +1037,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _totalLengthBox.Text = curveCount == 0
       ? "-"
       : FormatInfoNumber(ConvertLength(totalCurveLength, modelUnits, totalLengthUnits), _totalLengthUnitDrop);
-    vObjectPropertiesPlusPlugIn.DebugLog($"UpdateFromSelection: Set _totalLengthBox.Text={_totalLengthBox.Text}");
+    Log.Write($"UpdateFromSelection: Set _totalLengthBox.Text={_totalLengthBox.Text}");
 
     bool hasCircle = circleCount > 0;
     bool hasArc = arcCount > 0;
@@ -1277,7 +1277,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     SetControlEnabled(_showIsocurveCheck, false);
 
     _totalLengthBox.Text = "-";
-    vObjectPropertiesPlusPlugIn.DebugLog("SetEmptyState: Set _totalLengthBox.Text=-");
+    Log.Write("SetEmptyState: Set _totalLengthBox.Text=-");
     SetControlEnabled(_totalLengthBox, false);
     _totalLengthNameLabel.Text = "Total length";
     _curveMetricLabel.Text = "Length";
@@ -1870,12 +1870,12 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       if (selectedSubObjects != null && selectedSubObjects.Length > 0)
       {
         hasSegmentSelection = true;
-        vObjectPropertiesPlusPlugIn.DebugLog($"GetInfoCurvesForSelection: Object {obj.Id} has {selectedSubObjects.Length} selected subobjects");
+        Log.Write($"GetInfoCurvesForSelection: Object {obj.Id} has {selectedSubObjects.Length} selected subobjects");
         
         // Extract the actual segment curves from the selected subobjects
         foreach (var componentIndex in selectedSubObjects)
         {
-          vObjectPropertiesPlusPlugIn.DebugLog($"GetInfoCurvesForSelection: ComponentIndex Type={componentIndex.ComponentIndexType} Index={componentIndex.Index}");
+          Log.Write($"GetInfoCurvesForSelection: ComponentIndex Type={componentIndex.ComponentIndexType} Index={componentIndex.Index}");
           
           if (curve is PolyCurve polyCurve && componentIndex.Index >= 0)
           {
@@ -1890,7 +1890,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
                 IsSegment = true,
                 SegmentIndex = componentIndex.Index
               });
-              vObjectPropertiesPlusPlugIn.DebugLog($"GetInfoCurvesForSelection: Added PolyCurve segment {componentIndex.Index}, length={segment.GetLength()}");
+              Log.Write($"GetInfoCurvesForSelection: Added PolyCurve segment {componentIndex.Index}, length={segment.GetLength()}");
             }
           }
           else if (curve is Rhino.Geometry.PolylineCurve polyline && componentIndex.Index >= 0)
@@ -1907,13 +1907,13 @@ public sealed class vObjectPropertiesPlusPanel : Panel
                 IsSegment = true,
                 SegmentIndex = componentIndex.Index
               });
-              vObjectPropertiesPlusPlugIn.DebugLog($"GetInfoCurvesForSelection: Added Polyline segment {componentIndex.Index}, length={lineSegment.GetLength()}");
+              Log.Write($"GetInfoCurvesForSelection: Added Polyline segment {componentIndex.Index}, length={lineSegment.GetLength()}");
             }
           }
           else
           {
             // For other curve types or invalid indices, use the whole curve
-            vObjectPropertiesPlusPlugIn.DebugLog($"GetInfoCurvesForSelection: Unsupported curve type or invalid index, using whole curve");
+            Log.Write($"GetInfoCurvesForSelection: Unsupported curve type or invalid index, using whole curve");
             curveInfos.Add(new CurveInfo
             {
               Curve = curve,
@@ -3444,7 +3444,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       if (currentLength <= RhinoMath.ZeroTolerance)
         return;
 
-      vObjectPropertiesPlusPlugIn.DebugLog($"ApplyEditedSegmentLength: targetLength={targetLength}, currentLength={currentLength}, segmentType={focusedSegment.Curve.GetType().Name}");
+      Log.Write($"ApplyEditedSegmentLength: targetLength={targetLength}, currentLength={currentLength}, segmentType={focusedSegment.Curve.GetType().Name}");
 
       double scale = targetLength / currentLength;
 
@@ -3559,7 +3559,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
         double lengthDifference = Math.Abs(actualLength - targetLength);
         if (lengthDifference > lengthTolerance)
         {
-          vObjectPropertiesPlusPlugIn.DebugLog($"ApplyEditedSegmentLength: refusing replacement; actualLength={actualLength}, difference={lengthDifference}, tolerance={lengthTolerance}");
+          Log.Write($"ApplyEditedSegmentLength: refusing replacement; actualLength={actualLength}, difference={lengthDifference}, tolerance={lengthTolerance}");
           return;
         }
 
@@ -3567,7 +3567,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
         
         if (changed)
         {
-          vObjectPropertiesPlusPlugIn.DebugLog($"ApplyEditedSegmentLength: actualLength={actualLength}, difference={lengthDifference}");
+          Log.Write($"ApplyEditedSegmentLength: actualLength={actualLength}, difference={lengthDifference}");
         }
       }
     }
@@ -3640,7 +3640,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       return;
 
     double currentRadius = arcSegment.Arc.Radius;
-    vObjectPropertiesPlusPlugIn.DebugLog($"ApplyEditedSegmentRadius: targetRadius={targetRadius}, currentRadius={currentRadius}");
+    Log.Write($"ApplyEditedSegmentRadius: targetRadius={targetRadius}, currentRadius={currentRadius}");
 
     uint undoRecord = _doc.BeginUndoRecord("Properties+ Segment Radius");
     bool changed = false;
@@ -3690,7 +3690,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
           if (resultSegment is ArcCurve resultArc)
           {
             double actualRadius = resultArc.Arc.Radius;
-            vObjectPropertiesPlusPlugIn.DebugLog($"ApplyEditedSegmentRadius: actualRadius={actualRadius}, difference={Math.Abs(actualRadius - targetRadius)}");
+            Log.Write($"ApplyEditedSegmentRadius: actualRadius={actualRadius}, difference={Math.Abs(actualRadius - targetRadius)}");
           }
         }
       }
@@ -3826,7 +3826,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     }
     catch (Exception ex)
     {
-      vObjectPropertiesPlusPlugIn.DebugLog($"LoadUiIcon: {ex.Message}");
+      Log.Write($"LoadUiIcon: {ex.Message}");
     }
 
     _uiIconCache[iconName] = null;

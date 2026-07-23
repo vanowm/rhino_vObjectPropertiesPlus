@@ -1,4 +1,4 @@
-# vObjectProperties+  ·  v26.7.23.1750
+# vObjectProperties+  ·  v26.7.23.1803
 
 vObjectProperties+ is a Rhino 8 and Rhino 9 plug-in that adds a per-document **Properties+** panel for inspecting and editing object geometry, attributes, annotation, rendering, and display settings.
 
@@ -42,7 +42,7 @@ The Release plug-ins are:
 - `bin/Release/net7.0-windows/vObjectPropertiesPlus.dll` for Rhino 8
 - `bin/Release/net10.0-windows/vObjectPropertiesPlus.dll` for Rhino 9 Load it with Rhino's Plug-in Manager, then open **Properties+** from the Panels menu or run `vObjectPropertiesPlus`.
 
-Diagnostics are written to `logs/vObjectPropertiesPlus_debug.log` in a source checkout, with a deployed plug-in falling back to a `logs` folder beside the DLL.
+Runtime diagnostics are written to `vObjectPropertiesPlus.log` beside the loaded DLL. The file is cleared at startup and begins with the Rhino and plug-in versions.
 
 ## Versioning
 
