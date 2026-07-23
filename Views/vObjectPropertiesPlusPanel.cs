@@ -3758,34 +3758,26 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     if (_uiIconCache.TryGetValue(iconName, out var cached))
       return cached;
 
-    string assemblyDir = Path.GetDirectoryName(typeof(vObjectPropertiesPlusPanel).Assembly.Location) ?? AppContext.BaseDirectory;
-    string[] candidates =
+    try
     {
-      Path.Combine(assemblyDir, "rhino_svgs", iconName + ".svg"),
-      Path.Combine(assemblyDir, iconName + ".svg"),
-      Path.Combine(assemblyDir, "..", "icons", "rhino_svgs", iconName + ".svg"),
-      Path.Combine(AppContext.BaseDirectory, "rhino_svgs", iconName + ".svg")
-    };
+      var assembly = typeof(vObjectPropertiesPlusPanel).Assembly;
+      string resourceName = "vObjectPropertiesPlus.Icons." + iconName + ".svg";
+      using var stream = assembly.GetManifestResourceStream(resourceName);
+      if (stream == null)
+        throw new InvalidOperationException($"Embedded icon resource '{resourceName}' was not found.");
 
-    foreach (string path in candidates)
+      using var reader = new StreamReader(stream);
+      string svg = reader.ReadToEnd();
+      using var sysBitmap = Rhino.UI.DrawingUtilities.BitmapFromSvg(svg, 16, 16, true);
+      using var pngStream = new MemoryStream();
+      sysBitmap.Save(pngStream, System.Drawing.Imaging.ImageFormat.Png);
+      var etoBitmap = new Bitmap(pngStream.ToArray());
+      _uiIconCache[iconName] = etoBitmap;
+      return etoBitmap;
+    }
+    catch (Exception ex)
     {
-      try
-      {
-        if (!File.Exists(path))
-          continue;
-
-        string svg = File.ReadAllText(path);
-        using var sysBitmap = Rhino.UI.DrawingUtilities.BitmapFromSvg(svg, 16, 16, true);
-        string tmpPng = Path.Combine(Path.GetTempPath(), "vObjectPropertiesPlus_" + iconName + "_" + Guid.NewGuid().ToString("N") + ".png");
-        sysBitmap.Save(tmpPng);
-        var etoBitmap = new Bitmap(tmpPng);
-        try { File.Delete(tmpPng); } catch { }
-        _uiIconCache[iconName] = etoBitmap;
-        return etoBitmap;
-      }
-      catch
-      {
-      }
+      vObjectPropertiesPlusPlugIn.DebugLog($"LoadUiIcon: {ex.Message}");
     }
 
     _uiIconCache[iconName] = null;

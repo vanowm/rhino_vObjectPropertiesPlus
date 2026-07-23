@@ -38,34 +38,21 @@
     <EmbeddedResource Include="vObjectPropertiesPlus.bmp">
       <LogicalName>vObjectPropertiesPlus.bmp</LogicalName>
     </EmbeddedResource>
-
-    <Content Include="Resources\vObjectPropertiesPlus.svg">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <TargetPath>vObjectPropertiesPlus.svg</TargetPath>
-    </Content>
-    <Content Include="Resources\vObjectPropertiesPlus.ico">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <TargetPath>vObjectPropertiesPlus.ico</TargetPath>
-    </Content>
-    <Content Include="Resources\vObjectPropertiesPlus.png">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <TargetPath>vObjectPropertiesPlus.png</TargetPath>
-    </Content>
-    <Content Include="vObjectPropertiesPlus.bmp">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="..\icons\rhino_svgs\Layer.svg" Link="rhino_svgs\Layer.svg">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="..\icons\rhino_svgs\Block.svg" Link="rhino_svgs\Block.svg">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="..\icons\rhino_svgs\Render_Tools_Materials_Panel.svg" Link="rhino_svgs\Render_Tools_Materials_Panel.svg">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="..\icons\rhino_svgs\Display_Display_Panel.svg" Link="rhino_svgs\Display_Display_Panel.svg">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
+    <EmbeddedResource Include="Resources\vObjectPropertiesPlus.svg">
+      <LogicalName>vObjectPropertiesPlus.svg</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\icons\rhino_svgs\Layer.svg">
+      <LogicalName>vObjectPropertiesPlus.Icons.Layer.svg</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\icons\rhino_svgs\Block.svg">
+      <LogicalName>vObjectPropertiesPlus.Icons.Block.svg</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\icons\rhino_svgs\Render_Tools_Materials_Panel.svg">
+      <LogicalName>vObjectPropertiesPlus.Icons.Render_Tools_Materials_Panel.svg</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\icons\rhino_svgs\Display_Display_Panel.svg">
+      <LogicalName>vObjectPropertiesPlus.Icons.Display_Display_Panel.svg</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
   <Target Name="CompileWin32Resources" BeforeTargets="CoreCompile">

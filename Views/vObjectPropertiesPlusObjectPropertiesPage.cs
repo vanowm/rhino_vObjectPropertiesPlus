@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using System.Drawing;
-using System.IO;
 using System.Linq;
 using System.Runtime.Versioning;
 using Rhino;
@@ -43,21 +42,5 @@ internal sealed class vObjectPropertiesPlusObjectPropertiesPage : ObjectProperti
   }
 
   private static Icon LoadIcon()
-  {
-    try
-    {
-      string dir = Path.GetDirectoryName(typeof(vObjectPropertiesPlusObjectPropertiesPage).Assembly.Location) ?? AppContext.BaseDirectory;
-      string pngPath = Path.Combine(dir, "vObjectPropertiesPlus.png");
-      if (File.Exists(pngPath))
-      {
-        using var bmp = new Bitmap(pngPath);
-        return Icon.FromHandle(bmp.GetHicon());
-      }
-    }
-    catch
-    {
-    }
-
-    return SystemIcons.Application;
-  }
+    => vObjectPropertiesPlusPlugIn.LoadPanelIcon();
 }

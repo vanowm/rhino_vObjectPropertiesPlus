@@ -89,26 +89,7 @@ public class vObjectPropertiesPlusPlugIn : PlugIn
         }
       }
       
-      // Fallback to file system
-      string dir = Path.GetDirectoryName(asm.Location) ?? AppContext.BaseDirectory;
-      string icoPath = Path.Combine(dir, "vObjectPropertiesPlus.ico");
-      if (File.Exists(icoPath))
-      {
-        DebugLog($"LoadPanelIcon: loading from file '{icoPath}'");
-        _cachedPanelIcon = new System.Drawing.Icon(icoPath);
-        return _cachedPanelIcon;
-      }
-      
-      string pngPath = Path.Combine(dir, "vObjectPropertiesPlus.png");
-      if (File.Exists(pngPath))
-      {
-        DebugLog($"LoadPanelIcon: loading from file '{pngPath}'");
-        _iconBitmap = new System.Drawing.Bitmap(pngPath);
-        _cachedPanelIcon = System.Drawing.Icon.FromHandle(_iconBitmap.GetHicon());
-        return _cachedPanelIcon;
-      }
-      
-      DebugLog("LoadPanelIcon: no icon resource found, using system icon");
+      DebugLog("LoadPanelIcon: no embedded icon resource found, using system icon");
     }
     catch (Exception ex)
     {
