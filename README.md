@@ -12,9 +12,13 @@ It displays extra metrics for current object selection:
 
 ## Build
 
-1. Open `vPropertiesPlus.csproj` in Visual Studio 2022 or newer.
-2. Build in `Release` mode.
-3. Output is `vPropertiesPlus.dll` (and a versioned `vPropertiesPlus.<version>.dll`) in the build output folder.
+From this folder:
+
+```powershell
+.\build.ps1
+```
+
+This standalone Release build does not require Git and never commits or pushes. Repository maintainers can use `.\build.ps1 -Publish` for the semantic-message, signed-commit, and push workflow used by the normal VS Code build task. Output is written to `bin/Release/net7.0-windows/`.
 
 ## Install in Rhino 8
 
