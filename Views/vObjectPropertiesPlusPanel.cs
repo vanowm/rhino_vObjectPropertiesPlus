@@ -3356,6 +3356,20 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       return;
     }
 
+    if (_currentCurveInfos != null)
+    {
+      var selectedSegments = _currentCurveInfos.Where(ci => ci.IsSegment).ToList();
+      if (selectedSegments.Count == 1)
+      {
+        ApplyEditedSegmentLength(targetLength, selectedSegments[0]);
+        return;
+      }
+
+      // The displayed value is a segment summary, not the parent curve length.
+      if (selectedSegments.Count > 0)
+        return;
+    }
+
     uint undoRecord = _doc.BeginUndoRecord("Properties+ Length");
     bool changed = false;
     try
@@ -3401,18 +3415,22 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     }
   }
 
-  private void ApplyEditedSegmentLength(double targetLength)
+  private void ApplyEditedSegmentLength(double targetLength, CurveInfo? directlySelectedSegment = null)
   {
-    if (_doc == null || _currentCurveInfos == null || _focusedSegmentIndex < 0)
+    if (_doc == null || _currentCurveInfos == null)
       return;
 
-    // Find the focused segment
-    var focusedSegment = _currentCurveInfos.FirstOrDefault(s => 
-      s.SegmentIndex == _focusedSegmentIndex && s.ParentObject.Id == _focusedObjectId);
+    var focusedSegment = directlySelectedSegment;
+    if (focusedSegment == null && _focusedSegmentIndex >= 0)
+    {
+      focusedSegment = _currentCurveInfos.FirstOrDefault(s =>
+        s.SegmentIndex == _focusedSegmentIndex && s.ParentObject.Id == _focusedObjectId);
+    }
     
-    if (focusedSegment == null)
+    if (focusedSegment == null || !focusedSegment.IsSegment)
       return;
 
+    int segmentIndex = focusedSegment.SegmentIndex;
     var parentObj = focusedSegment.ParentObject;
     if (parentObj.Geometry is not Curve parentCurve)
       return;
@@ -3444,7 +3462,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
           if (segment == null)
             continue;
 
-          if (i == _focusedSegmentIndex)
+          if (i == segmentIndex)
           {
             // Modify this segment to achieve target length
             Curve? modifiedSegment = null;
@@ -3474,24 +3492,28 @@ public sealed class vObjectPropertiesPlusPanel : Panel
                   modifiedSegment = new ArcCurve(newArc);
               }
             }
-            // For other curve types, scale around segment center
+            // For other curve types, preserve the start join while scaling.
             else
             {
-              var bbox = segment.GetBoundingBox(true);
-              var xform = Transform.Scale(bbox.Center, scale);
+              var xform = Transform.Scale(segment.PointAtStart, scale);
               modifiedSegment = segment.DuplicateCurve();
               if (!modifiedSegment.Transform(xform))
                 return;
             }
             
             if (modifiedSegment != null)
-              newPolyCurve.Append(modifiedSegment);
-            else
-              newPolyCurve.Append(segment);
+            {
+              if (!newPolyCurve.Append(modifiedSegment))
+                return;
+            }
+            else if (!newPolyCurve.Append(segment))
+            {
+              return;
+            }
           }
-          else
+          else if (!newPolyCurve.Append(segment))
           {
-            newPolyCurve.Append(segment);
+            return;
           }
         }
         
@@ -3509,16 +3531,20 @@ public sealed class vObjectPropertiesPlusPanel : Panel
         }
 
         // For a polyline, segment index i is the line from point i to point i+1
-        if (_focusedSegmentIndex >= 0 && _focusedSegmentIndex < points.Count - 1)
+        if (segmentIndex >= 0 && segmentIndex < points.Count - 1)
         {
-          Point3d p0 = points[_focusedSegmentIndex];
-          Point3d p1 = points[_focusedSegmentIndex + 1];
+          Point3d p0 = points[segmentIndex];
+          Point3d p1 = points[segmentIndex + 1];
           
           Vector3d direction = p1 - p0;
-          direction.Unitize();
+          if (!direction.Unitize())
+            return;
           
           // Move p1 to achieve target length
-          points[_focusedSegmentIndex + 1] = p0 + direction * targetLength;
+          Point3d newEnd = p0 + direction * targetLength;
+          points[segmentIndex + 1] = newEnd;
+          if (polylineCurve.IsClosed && segmentIndex == points.Count - 2)
+            points[0] = newEnd;
         }
 
         newParentCurve = new PolylineCurve(points);
@@ -3526,25 +3552,22 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
       if (newParentCurve != null)
       {
+        if (!TryGetSegmentLength(newParentCurve, segmentIndex, out double actualLength))
+          return;
+
+        double lengthTolerance = Math.Max(_doc.ModelAbsoluteTolerance, Math.Max(targetLength, 1.0) * 1e-9);
+        double lengthDifference = Math.Abs(actualLength - targetLength);
+        if (lengthDifference > lengthTolerance)
+        {
+          vObjectPropertiesPlusPlugIn.DebugLog($"ApplyEditedSegmentLength: refusing replacement; actualLength={actualLength}, difference={lengthDifference}, tolerance={lengthTolerance}");
+          return;
+        }
+
         changed = _doc.Objects.Replace(parentObj.Id, newParentCurve);
         
         if (changed)
         {
-          // Debug: verify the actual length achieved
-          if (newParentCurve is PolyCurve pc && _focusedSegmentIndex < pc.SegmentCount)
-          {
-            var resultSegment = pc.SegmentCurve(_focusedSegmentIndex);
-            if (resultSegment != null)
-            {
-              double actualLength = resultSegment.GetLength();
-              vObjectPropertiesPlusPlugIn.DebugLog($"ApplyEditedSegmentLength: actualLength={actualLength}, difference={Math.Abs(actualLength - targetLength)}");
-            }
-          }
-          else if (newParentCurve is PolylineCurve plc && _focusedSegmentIndex < plc.PointCount - 1)
-          {
-            double actualLength = plc.Point(_focusedSegmentIndex).DistanceTo(plc.Point(_focusedSegmentIndex + 1));
-            vObjectPropertiesPlusPlugIn.DebugLog($"ApplyEditedSegmentLength: actualLength={actualLength}, difference={Math.Abs(actualLength - targetLength)}");
-          }
+          vObjectPropertiesPlusPlugIn.DebugLog($"ApplyEditedSegmentLength: actualLength={actualLength}, difference={lengthDifference}");
         }
       }
     }
@@ -3558,16 +3581,42 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     {
       _doc.Views.Redraw();
       // Stay on the segment view after edit
-      var freshObj = _doc.Objects.FindId(_focusedObjectId);
+      var freshObj = _doc.Objects.FindId(parentObj.Id);
       if (freshObj != null)
       {
         var segments = GetInfoCurvesForSelection(new[] { freshObj }, out _);
-        if (segments.Any(s => s.SegmentIndex == _focusedSegmentIndex))
+        if (_focusedSegmentIndex >= 0 && _focusedObjectId == parentObj.Id &&
+            segments.Any(s => s.SegmentIndex == segmentIndex))
         {
-          RefreshForSegmentSelection(segments, _focusedSegmentIndex);
+          RefreshForSegmentSelection(segments, segmentIndex);
+        }
+        else
+        {
+          UpdateFromSelection(_doc, new[] { freshObj });
         }
       }
     }
+  }
+
+  private static bool TryGetSegmentLength(Curve parentCurve, int segmentIndex, out double length)
+  {
+    length = 0.0;
+    if (parentCurve is PolyCurve polyCurve && segmentIndex >= 0 && segmentIndex < polyCurve.SegmentCount)
+    {
+      var segment = polyCurve.SegmentCurve(segmentIndex);
+      if (segment == null)
+        return false;
+      length = segment.GetLength();
+      return true;
+    }
+
+    if (parentCurve is PolylineCurve polylineCurve && segmentIndex >= 0 && segmentIndex < polylineCurve.PointCount - 1)
+    {
+      length = polylineCurve.Point(segmentIndex).DistanceTo(polylineCurve.Point(segmentIndex + 1));
+      return true;
+    }
+
+    return false;
   }
 
   private void ApplyEditedSegmentRadius(double targetRadius)
