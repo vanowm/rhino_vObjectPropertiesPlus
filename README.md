@@ -1,4 +1,4 @@
-# vPropertiesPlus
+# vPropertiesPlus  ·  v26.7.20.1501
 
 vPropertiesPlus is a Rhino plug-in that adds a custom section to the built-in Properties panel.
 

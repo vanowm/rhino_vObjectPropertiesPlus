@@ -9,17 +9,6 @@
     <Title>vObjectProperties+</Title>
     <RootNamespace>vObjectPropertiesPlus</RootNamespace>
     <LangVersion>latest</LangVersion>
-    <Deterministic>true</Deterministic>
-    <BuildVersion>$([System.DateTime]::Now.ToString('yy.M.d.HHmm'))</BuildVersion>
-    <Version>$(BuildVersion)</Version>
-    <InformationalVersion>$(BuildVersion)</InformationalVersion>
-    <AssemblyVersion>$(BuildVersion)</AssemblyVersion>
-    <FileVersion>$(BuildVersion)</FileVersion>
-    <!-- Fail fast when output files are locked (no retry loop). -->
-    <CopyRetryCount>0</CopyRetryCount>
-    <CopyRetryDelayMilliseconds>0</CopyRetryDelayMilliseconds>
-    <!-- Enabled: successful Release builds auto-commit tracked version artifacts. -->
-    <AutoCommitVersionOnRelease>True</AutoCommitVersionOnRelease>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -40,24 +29,27 @@
   </ItemGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="vObjectPropertiesPlus.png">
+    <EmbeddedResource Include="Resources\vObjectPropertiesPlus.png">
       <LogicalName>vObjectPropertiesPlus.png</LogicalName>
     </EmbeddedResource>
-    <EmbeddedResource Include="vObjectPropertiesPlus.ico">
+    <EmbeddedResource Include="Resources\vObjectPropertiesPlus.ico">
       <LogicalName>vObjectPropertiesPlus.ico</LogicalName>
     </EmbeddedResource>
     <EmbeddedResource Include="vObjectPropertiesPlus.bmp">
       <LogicalName>vObjectPropertiesPlus.bmp</LogicalName>
     </EmbeddedResource>
 
-    <Content Include="vObjectPropertiesPlus.svg">
+    <Content Include="Resources\vObjectPropertiesPlus.svg">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <TargetPath>vObjectPropertiesPlus.svg</TargetPath>
     </Content>
-    <Content Include="vObjectPropertiesPlus.ico">
+    <Content Include="Resources\vObjectPropertiesPlus.ico">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <TargetPath>vObjectPropertiesPlus.ico</TargetPath>
     </Content>
-    <Content Include="vObjectPropertiesPlus.png">
+    <Content Include="Resources\vObjectPropertiesPlus.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <TargetPath>vObjectPropertiesPlus.png</TargetPath>
     </Content>
     <Content Include="vObjectPropertiesPlus.bmp">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
@@ -78,156 +70,49 @@
 
   <Target Name="CompileWin32Resources" BeforeTargets="CoreCompile">
     <PropertyGroup>
-      <WindowsSDKPath Condition="'$(WindowsSDKPath)' == ''">$(ProgramFiles(x86))\Windows Kits\10\bin</WindowsSDKPath>
+      <GeneratedRcFile>$(IntermediateOutputPath)vObjectPropertiesPlus.generated.rc</GeneratedRcFile>
+      <RcNumericVersion>$([System.Version]::Parse('$(BuildVersion)').Major),$([System.Version]::Parse('$(BuildVersion)').Minor),$([System.Version]::Parse('$(BuildVersion)').Build),$([System.Version]::Parse('$(BuildVersion)').Revision)</RcNumericVersion>
     </PropertyGroup>
     <ItemGroup>
-      <RcExeFiles Include="$(WindowsSDKPath)\**\x64\rc.exe" />
+      <RcVersionLines Include="1 VERSIONINFO" />
+      <RcVersionLines Include="FILEVERSION $(RcNumericVersion)" />
+      <RcVersionLines Include="PRODUCTVERSION $(RcNumericVersion)" />
+      <RcVersionLines Include="FILEFLAGSMASK 0x3fL" />
+      <RcVersionLines Include="FILEFLAGS 0x0L" />
+      <RcVersionLines Include="FILEOS 0x40004L" />
+      <RcVersionLines Include="FILETYPE 0x2L" />
+      <RcVersionLines Include="FILESUBTYPE 0x0L" />
+      <RcVersionLines Include="BEGIN" />
+      <RcVersionLines Include="  BLOCK &quot;StringFileInfo&quot;" />
+      <RcVersionLines Include="  BEGIN" />
+      <RcVersionLines Include="    BLOCK &quot;040904E4&quot;" />
+      <RcVersionLines Include="    BEGIN" />
+      <RcVersionLines Include="      VALUE &quot;FileDescription&quot;, &quot;vObjectProperties+&quot;" />
+      <RcVersionLines Include="      VALUE &quot;FileVersion&quot;, &quot;$(BuildVersion)&quot;" />
+      <RcVersionLines Include="      VALUE &quot;InternalName&quot;, &quot;vObjectPropertiesPlus&quot;" />
+      <RcVersionLines Include="      VALUE &quot;OriginalFilename&quot;, &quot;vObjectPropertiesPlus.dll&quot;" />
+      <RcVersionLines Include="      VALUE &quot;ProductName&quot;, &quot;vObjectProperties+&quot;" />
+      <RcVersionLines Include="      VALUE &quot;ProductVersion&quot;, &quot;$(BuildVersion)&quot;" />
+      <RcVersionLines Include="    END" />
+      <RcVersionLines Include="  END" />
+      <RcVersionLines Include="  BLOCK &quot;VarFileInfo&quot;" />
+      <RcVersionLines Include="  BEGIN" />
+      <RcVersionLines Include="    VALUE &quot;Translation&quot;, 0x0409, 1252" />
+      <RcVersionLines Include="  END" />
+      <RcVersionLines Include="END" />
     </ItemGroup>
-    <PropertyGroup>
-      <RcExePath>@(RcExeFiles->'%(FullPath)', ' ')</RcExePath>
-      <RcExeFirst>$([System.String]::Copy('$(RcExePath)').Split(' ')[0])</RcExeFirst>
-    </PropertyGroup>
-    <Exec Command="&quot;$(RcExeFirst)&quot; /fo &quot;$(IntermediateOutputPath)vObjectPropertiesPlus.res&quot; vObjectPropertiesPlus.rc"
-          WorkingDirectory="$(ProjectDir)"
-          Condition="'$(RcExeFirst)' != ''" />
-  </Target>
-
-  <Target Name="GenerateBuildVersionInfo" BeforeTargets="CoreCompile">
-    <PropertyGroup>
-      <GeneratedVersionInfoFile>$(IntermediateOutputPath)vObjectPropertiesPlus.GeneratedVersionInfo.cs</GeneratedVersionInfoFile>
-    </PropertyGroup>
-
-    <ItemGroup>
-      <GeneratedVersionInfoLines Include="[assembly: System.Reflection.AssemblyVersion(&quot;$(AssemblyVersion)&quot;)]" />
-      <GeneratedVersionInfoLines Include="[assembly: System.Reflection.AssemblyFileVersion(&quot;$(FileVersion)&quot;)]" />
-      <GeneratedVersionInfoLines Include="[assembly: System.Reflection.AssemblyInformationalVersion(&quot;$(InformationalVersion)&quot;)]" />
-    </ItemGroup>
-
+    <ReadLinesFromFile File="$(ProjectDir)Resources\vObjectPropertiesPlus.rc">
+      <Output TaskParameter="Lines" ItemName="RcSourceLines" />
+    </ReadLinesFromFile>
     <WriteLinesToFile
-      File="$(GeneratedVersionInfoFile)"
-      Lines="@(GeneratedVersionInfoLines)"
+      File="$(GeneratedRcFile)"
+      Lines="@(RcSourceLines);@(RcVersionLines)"
       Overwrite="true"
       Encoding="UTF-8" />
-
-    <ItemGroup>
-      <Compile Include="$(GeneratedVersionInfoFile)" />
-    </ItemGroup>
-
-    <Message Importance="high" Text="vObjectPropertiesPlus build version: $(BuildVersion)" />
+    <Exec
+      Command="powershell -NoProfile -ExecutionPolicy Bypass -Command &quot;$root=Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFilesX86)) 'Windows Kits\10\bin'; $rc=Get-ChildItem -LiteralPath $root -Recurse -File -Filter 'rc.exe' | Where-Object { $_.Directory.Name -eq 'x64' } | Sort-Object FullName -Descending | Select-Object -First 1; if (-not $rc) { Write-Error 'Windows SDK rc.exe was not found.'; exit 1 }; &amp; $rc.FullName /nologo /fo '$(MSBuildProjectDirectory)\$(IntermediateOutputPath)vObjectPropertiesPlus.res' '$(MSBuildProjectDirectory)\$(GeneratedRcFile)'; exit $LASTEXITCODE&quot;"
+      WorkingDirectory="$(ProjectDir)Resources" />
   </Target>
 
-  <!-- Create a timestamped snapshot of the DLL after every successful Release build. -->
-  <Target Name="CopyVersionedPluginArtifact" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
-    <PropertyGroup>
-      <ArtifactTimestamp>$([System.DateTime]::Now.ToString('yy.MM.dd.HHmmss'))</ArtifactTimestamp>
-      <BackupsDir>$(TargetDir)backups\</BackupsDir>
-    </PropertyGroup>
-    <MakeDir Directories="$(BackupsDir)" />
-    <Copy
-      SourceFiles="$(TargetPath)"
-      DestinationFiles="$(BackupsDir)$(AssemblyName).$(ArtifactTimestamp)$(TargetExt)"
-      SkipUnchangedFiles="true" />
-  </Target>
-
-  <!-- Commit updated version metadata and release plugin binary after successful Release builds. -->
-  <Target Name="CommitReleaseVersion" AfterTargets="CopyVersionedPluginArtifact" Condition="'$(Configuration)' == 'Release' and '$(AutoCommitVersionOnRelease)' == 'true' and !Exists('$(MSBuildProjectDirectory)\.git\vObjectPropertiesPlus-hold-commits')">
-    <PropertyGroup>
-      <ShortTagVersion>$([System.Text.RegularExpressions.Regex]::Match('$(Version)', '^\d{2}\.\d{2}\.\d{2}').Value)</ShortTagVersion>
-    </PropertyGroup>
-
-    <Exec
-      Command="git -C &quot;$(MSBuildProjectDirectory)&quot; add -A -- ."
-      IgnoreExitCode="true" />
-
-    <Exec
-      Command="git -C &quot;$(MSBuildProjectDirectory)&quot; diff --cached --quiet -- ."
-      IgnoreExitCode="true">
-      <Output TaskParameter="ExitCode" PropertyName="VersionCommitDiffExitCode" />
-    </Exec>
-
-    <Exec
-      Command="git -C &quot;$(MSBuildProjectDirectory)&quot; diff --cached --quiet -- &quot;bin/Release/net7.0-windows/vObjectPropertiesPlus.dll&quot;"
-      IgnoreExitCode="true"
-      Condition="'$(VersionCommitDiffExitCode)' != '0'">
-      <Output TaskParameter="ExitCode" PropertyName="VersionDllDiffExitCode" />
-    </Exec>
-
-    <!-- If a pending message was written before this build, use it directly. -->
-    <PropertyGroup Condition="'$(VersionCommitDiffExitCode)' != '0'">
-      <PendingMessageFile>$(MSBuildProjectDirectory)\.git\vObjectPropertiesPlus-pending-message.txt</PendingMessageFile>
-      <HasPendingMessage Condition="Exists('$(PendingMessageFile)')">true</HasPendingMessage>
-    </PropertyGroup>
-
-    <Error
-      Condition="'$(VersionCommitDiffExitCode)' != '0' and '$(HasPendingMessage)' != 'true'"
-      Text="Missing $(MSBuildProjectDirectory)\.git\vObjectPropertiesPlus-pending-message.txt. Commit message required before committing version changes." />
-
-    <Exec
-      Command="powershell -NoProfile -ExecutionPolicy Bypass -Command &quot;$body=[System.IO.File]::ReadAllText('$(PendingMessageFile)').Trim(); $msg='$(Version): ' + $body; $enc=New-Object System.Text.UTF8Encoding($false); [System.IO.File]::WriteAllText('$(MSBuildProjectDirectory)\.git\vObjectPropertiesPlus-autocommit-message.txt',$msg,$enc)&quot;"
-      Condition="'$(HasPendingMessage)' == 'true' and '$(VersionCommitDiffExitCode)' != '0'"
-      IgnoreExitCode="true" />
-
-    <Delete
-      Files="$(PendingMessageFile)"
-      Condition="'$(HasPendingMessage)' == 'true' and '$(VersionCommitDiffExitCode)' != '0'" />
-
-    <PropertyGroup Condition="'$(HasPendingMessage)' == 'true' and '$(VersionCommitDiffExitCode)' != '0'">
-      <VersionCommitMessageExitCode>0</VersionCommitMessageExitCode>
-    </PropertyGroup>
-
-    <Exec
-      Command="git -C &quot;$(MSBuildProjectDirectory)&quot; commit -F &quot;.git/vObjectPropertiesPlus-autocommit-message.txt&quot;"
-      IgnoreExitCode="true"
-      Condition="'$(VersionCommitDiffExitCode)' != '0' and '$(VersionCommitMessageExitCode)' == '0'">
-      <Output TaskParameter="ExitCode" PropertyName="VersionCommitExitCode" />
-    </Exec>
-
-    <Exec
-      Command="git -C &quot;$(MSBuildProjectDirectory)&quot; rev-parse -q --verify &quot;refs/tags/$(ShortTagVersion)&quot;"
-      IgnoreExitCode="true"
-      Condition="'$(VersionCommitDiffExitCode)' != '0' and '$(VersionCommitExitCode)' == '0' and '$(ShortTagVersion)' != ''">
-      <Output TaskParameter="ExitCode" PropertyName="ShortTagExistsExitCode" />
-    </Exec>
-
-    <Exec
-      Command="git -C &quot;$(MSBuildProjectDirectory)&quot; tag &quot;$(ShortTagVersion)&quot;"
-      IgnoreExitCode="true"
-      Condition="'$(VersionCommitDiffExitCode)' != '0' and '$(VersionCommitExitCode)' == '0' and '$(ShortTagVersion)' != '' and '$(ShortTagExistsExistsExitCode)' != '0'">
-      <Output TaskParameter="ExitCode" PropertyName="ShortTagCreateExitCode" />
-    </Exec>
-
-    <Message
-      Importance="high"
-      Text="vObjectPropertiesPlus version commit created: $(Version)"
-      Condition="'$(VersionCommitDiffExitCode)' != '0' and '$(VersionCommitExitCode)' == '0'" />
-
-    <Message
-      Importance="high"
-      Text="vObjectPropertiesPlus version commit skipped (release DLL unchanged or locked)."
-      Condition="'$(VersionCommitDiffExitCode)' != '0' and '$(VersionCommitExitCode)' != '0' and '$(VersionDllDiffExitCode)' == '0'" />
-
-    <Message
-      Importance="high"
-      Text="vObjectPropertiesPlus version commit skipped (failed to build auto commit message)."
-      Condition="'$(VersionCommitDiffExitCode)' != '0' and '$(VersionCommitMessageExitCode)' != '0'" />
-
-    <Message
-      Importance="high"
-      Text="vObjectPropertiesPlus version commit skipped (git commit failed; check git identity, branch, or repo state)."
-      Condition="'$(VersionCommitDiffExitCode)' != '0' and '$(VersionCommitMessageExitCode)' == '0' and '$(VersionCommitExitCode)' != '0'" />
-
-    <Message
-      Importance="high"
-      Text="vObjectPropertiesPlus version commit skipped (no staged changes)."
-      Condition="'$(VersionCommitDiffExitCode)' == '0'" />
-  </Target>
-
-  <Target Name="ShowOutputVersionAfterBuild" AfterTargets="Build" Condition="Exists('$(TargetPath)')">
-    <GetAssemblyIdentity AssemblyFiles="$(TargetPath)">
-      <Output TaskParameter="Assemblies" ItemName="BuiltAssembly" />
-    </GetAssemblyIdentity>
-
-    <Message Importance="high" Text="Built output: $(TargetPath)" />
-    <Message Importance="high" Text="Built version: %(BuiltAssembly.Version)" />
-  </Target>
+  <Import Project="Build.Release.targets" />
 </Project>
