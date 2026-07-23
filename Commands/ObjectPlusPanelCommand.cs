@@ -9,7 +9,7 @@ namespace vObjectPropertiesPlus.Commands;
 [SupportedOSPlatform("windows")]
 public class ObjectPlusPanelCommand : Command
 {
-  public override string EnglishName => "ObjectPlusPanel";
+  public override string EnglishName => "vObjectPropertiesPlus";
 
   protected override Result RunCommand(RhinoDoc doc, RunMode mode)
   {
