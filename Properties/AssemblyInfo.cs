@@ -20,3 +20,4 @@ using Rhino.PlugIns;
 [assembly: PlugInDescription(DescriptionType.Organization, "")]
 [assembly: PlugInDescription(DescriptionType.UpdateUrl, "")]
 [assembly: PlugInDescription(DescriptionType.WebSite, "")]
+[assembly: PlugInDescription(DescriptionType.Icon, "vObjectPropertiesPlus.ico")]
