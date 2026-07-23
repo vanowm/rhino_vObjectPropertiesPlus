@@ -35,12 +35,6 @@
     <EmbeddedResource Include="Resources\vObjectPropertiesPlus.ico">
       <LogicalName>vObjectPropertiesPlus.ico</LogicalName>
     </EmbeddedResource>
-    <EmbeddedResource Include="vObjectPropertiesPlus.bmp">
-      <LogicalName>vObjectPropertiesPlus.bmp</LogicalName>
-    </EmbeddedResource>
-    <EmbeddedResource Include="Resources\vObjectPropertiesPlus.svg">
-      <LogicalName>vObjectPropertiesPlus.svg</LogicalName>
-    </EmbeddedResource>
     <EmbeddedResource Include="..\icons\rhino_svgs\Layer.svg">
       <LogicalName>vObjectPropertiesPlus.Icons.Layer.svg</LogicalName>
     </EmbeddedResource>
