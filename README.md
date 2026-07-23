@@ -1,6 +1,6 @@
-# vObjectProperties+  ·  v26.7.23.1305
+# vObjectProperties+  ·  v26.7.23.1750
 
-vObjectProperties+ is a Rhino 8 plug-in that adds a per-document **Properties+** panel for inspecting and editing object geometry, attributes, annotation, rendering, and display settings.
+vObjectProperties+ is a Rhino 8 and Rhino 9 plug-in that adds a per-document **Properties+** panel for inspecting and editing object geometry, attributes, annotation, rendering, and display settings.
 
 ## Features
 
@@ -22,8 +22,8 @@ The panel is also available from Rhino's Panels menu and from the **Properties+*
 
 ## Requirements
 
-- Rhino 8 for Windows
-- .NET 7 SDK or newer to build
+- Rhino 8 and Rhino 9 for Windows
+- .NET 10 SDK with the .NET 7 targeting pack to build
 
 ## Build
 
@@ -33,11 +33,14 @@ From the repository folder:
 .\build.ps1
 ```
 
-The default Release build does not require Git and never commits or pushes. Maintainers can use `.\build.ps1 -Publish` to build, create a signed semantic commit when the DLL changes, push `master`, and publish a GitHub release containing the DLL and any generated `.rui` files.
+The default Release build does not require Git and never commits or pushes. Maintainers can use `.\build.ps1 -Publish` to build, create a signed semantic commit when the DLL changes, push `master`, and publish a GitHub release containing separate Rhino 8/.NET 7 and Rhino 9/.NET 10 DLLs, plus any generated `.rui` files.
 
 ## Installation
 
-The Release plug-in is `bin/Release/net7.0-windows/vObjectPropertiesPlus.dll`. Load it with Rhino's Plug-in Manager, then open **Properties+** from the Panels menu or run `vObjectPropertiesPlus`.
+The Release plug-ins are:
+
+- `bin/Release/net7.0-windows/vObjectPropertiesPlus.dll` for Rhino 8
+- `bin/Release/net10.0-windows/vObjectPropertiesPlus.dll` for Rhino 9 Load it with Rhino's Plug-in Manager, then open **Properties+** from the Panels menu or run `vObjectPropertiesPlus`.
 
 Diagnostics are written to `logs/vObjectPropertiesPlus_debug.log` in a source checkout, with a deployed plug-in falling back to a `logs` folder beside the DLL.
 
