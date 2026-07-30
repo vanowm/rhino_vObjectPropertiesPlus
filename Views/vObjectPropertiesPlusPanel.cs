@@ -31,6 +31,11 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private const int InfoPrecisionDropWidth = 64;
   private const int RowHeight = 20;
   private const string DocUnitPrefsSection = "vObjectPropertiesPlus.InfoUnits";
+  private const string GeneralSectionCollapsedKey = "Panel.GeneralSectionCollapsed";
+  private const string TextSectionCollapsedKey = "Panel.TextSectionCollapsed";
+  private const string MeshSectionCollapsedKey = "Panel.MeshSectionCollapsed";
+  private const string RenderingSectionCollapsedKey = "Panel.RenderingSectionCollapsed";
+  private const string IsocurveSectionCollapsedKey = "Panel.IsocurveSectionCollapsed";
 
   private readonly DropDown _typeDrop;
   private readonly TextBox _nameBox;
@@ -148,6 +153,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
   public vObjectPropertiesPlusPanel()
   {
+    LoadSectionCollapseStates();
+
     _typeDrop = new DropDown { Width = ValueWidth, Height = RowHeight };
     _typeDrop.SelectedIndexChanged += OnTypeDropSelectedIndexChanged;
     _nameBox = NewValueBox();
@@ -426,16 +433,21 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     };
 
     var generalSection = CreateCollapsibleSection("General", generalTable,
-      () => _generalSectionCollapsed, value => _generalSectionCollapsed = value);
+      () => _generalSectionCollapsed,
+      value => SetSectionCollapsed(GeneralSectionCollapsedKey, ref _generalSectionCollapsed, value));
     _textSection = CreateCollapsibleSection("Text", textSectionContent,
-      () => _textSectionCollapsed, value => _textSectionCollapsed = value);
+      () => _textSectionCollapsed,
+      value => SetSectionCollapsed(TextSectionCollapsedKey, ref _textSectionCollapsed, value));
     _textSection.Visible = false;
     var meshSection = CreateCollapsibleSection("Render Mesh Settings", meshTable,
-      () => _meshSectionCollapsed, value => _meshSectionCollapsed = value);
+      () => _meshSectionCollapsed,
+      value => SetSectionCollapsed(MeshSectionCollapsedKey, ref _meshSectionCollapsed, value));
     var renderingSection = CreateCollapsibleSection("Rendering", renderingTable,
-      () => _renderingSectionCollapsed, value => _renderingSectionCollapsed = value);
+      () => _renderingSectionCollapsed,
+      value => SetSectionCollapsed(RenderingSectionCollapsedKey, ref _renderingSectionCollapsed, value));
     var isocurveSection = CreateCollapsibleSection("Isocurve Density", isocurveTable,
-      () => _isocurveSectionCollapsed, value => _isocurveSectionCollapsed = value);
+      () => _isocurveSectionCollapsed,
+      value => SetSectionCollapsed(IsocurveSectionCollapsedKey, ref _isocurveSectionCollapsed, value));
 
     Content = new StackLayout
     {
@@ -5307,6 +5319,38 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     content.Visible = !getCollapsed();
     Install();
     group.Load += (_, _) => Install();
+  }
+
+  private void LoadSectionCollapseStates()
+  {
+    try
+    {
+      var settings = vObjectPropertiesPlusPlugIn.Instance.Settings;
+      _generalSectionCollapsed = settings.GetBool(GeneralSectionCollapsedKey, false);
+      _textSectionCollapsed = settings.GetBool(TextSectionCollapsedKey, false);
+      _meshSectionCollapsed = settings.GetBool(MeshSectionCollapsedKey, false);
+      _renderingSectionCollapsed = settings.GetBool(RenderingSectionCollapsedKey, false);
+      _isocurveSectionCollapsed = settings.GetBool(IsocurveSectionCollapsedKey, false);
+    }
+    catch (Exception ex)
+    {
+      Log.Write($"LoadSectionCollapseStates failed: {ex.Message}");
+    }
+  }
+
+  private static void SetSectionCollapsed(string settingKey, ref bool state, bool collapsed)
+  {
+    state = collapsed;
+    try
+    {
+      var plugIn = vObjectPropertiesPlusPlugIn.Instance;
+      plugIn.Settings.SetBool(settingKey, collapsed);
+      plugIn.SaveSettings();
+    }
+    catch (Exception ex)
+    {
+      Log.Write($"SetSectionCollapsed failed for {settingKey}: {ex.Message}");
+    }
   }
 
   private static Control NewRule()
