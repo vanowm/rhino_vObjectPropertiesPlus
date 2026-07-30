@@ -81,7 +81,13 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private readonly TextArea _textContentArea;
   private readonly UITimer _textContentTimer = new UITimer { Interval = 0.4 };
   private readonly Control _infoPlusSection;
-  private readonly TableLayout _textSection;
+  private readonly GroupBox _textSection;
+
+  private bool _generalSectionCollapsed;
+  private bool _textSectionCollapsed;
+  private bool _meshSectionCollapsed;
+  private bool _renderingSectionCollapsed;
+  private bool _isocurveSectionCollapsed;
 
   private readonly Button _matchButton;
   private readonly Button _detailsButton;
@@ -104,6 +110,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     public required Curve Curve { get; init; }
     public required RhinoObject ParentObject { get; init; }
     public bool IsSegment { get; init; }
+    public bool IsEdge { get; init; }
     public int SegmentIndex { get; init; }
   }
 
@@ -407,18 +414,28 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       }
     };
 
-    _textSection = new TableLayout
+    var textSectionContent = new TableLayout
     {
-      Visible = false,
       Spacing = new Eto.Drawing.Size(0, 0),
       Rows =
       {
-        new TableRow(new TableCell(NewSectionLabel("Text"), true)),
         new TableRow(new TableCell(textTable, true)),
         new TableRow(new TableCell(alignStylePanel, true)),
         new TableRow(new TableCell(new Panel { Content = _textContentArea, Padding = new Eto.Drawing.Padding(10, 2, 6, 2) }, true)),
       }
     };
+
+    var generalSection = CreateCollapsibleSection("General", generalTable,
+      () => _generalSectionCollapsed, value => _generalSectionCollapsed = value);
+    _textSection = CreateCollapsibleSection("Text", textSectionContent,
+      () => _textSectionCollapsed, value => _textSectionCollapsed = value);
+    _textSection.Visible = false;
+    var meshSection = CreateCollapsibleSection("Render Mesh Settings", meshTable,
+      () => _meshSectionCollapsed, value => _meshSectionCollapsed = value);
+    var renderingSection = CreateCollapsibleSection("Rendering", renderingTable,
+      () => _renderingSectionCollapsed, value => _renderingSectionCollapsed = value);
+    var isocurveSection = CreateCollapsibleSection("Isocurve Density", isocurveTable,
+      () => _isocurveSectionCollapsed, value => _isocurveSectionCollapsed = value);
 
     Content = new StackLayout
     {
@@ -429,15 +446,11 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       {
         typeTable,
         _infoPlusSection,
-        NewSectionLabel("General"),
-        generalTable,
+        generalSection,
         _textSection,
-        NewSectionLabel("Render Mesh Settings"),
-        meshTable,
-        NewSectionLabel("Rendering"),
-        renderingTable,
-        NewSectionLabel("Isocurve Density"),
-        isocurveTable,
+        meshSection,
+        renderingSection,
+        isocurveSection,
         new StackLayout
         {
           Orientation = Orientation.Horizontal,
@@ -634,10 +647,10 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       // Now override geometry metrics with segment-specific values
       SetControlEnabled(_infoPrecisionDrop, true);
       
-      // Segment geometry metrics are editable - they will modify the specific segment
-      _curveMetricBox.ReadOnly = false;
-      _radiusBox.ReadOnly = false;
-      _diameterBox.ReadOnly = false;
+      bool hasReadOnlyEdge = segments.Any(s => s.IsEdge);
+      _curveMetricBox.ReadOnly = hasReadOnlyEdge;
+      _radiusBox.ReadOnly = hasReadOnlyEdge;
+      _diameterBox.ReadOnly = hasReadOnlyEdge;
       
       // Compute curve metrics for the segment(s)
       // If a specific segment is focused, show only that segment's metrics
@@ -922,6 +935,10 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       _densityStepper.Value = -1;
 
     _currentCurveInfos = GetInfoCurvesForSelection(objectList, out bool hasSegmentSelection);
+    bool hasReadOnlyEdgeSelection = _currentCurveInfos.Any(ci => ci.IsEdge);
+    _curveMetricBox.ReadOnly = hasReadOnlyEdgeSelection;
+    _radiusBox.ReadOnly = hasReadOnlyEdgeSelection;
+    _diameterBox.ReadOnly = hasReadOnlyEdgeSelection;
     
     // Populate type dropdown
     var typeItems = new List<string>();
@@ -1395,6 +1412,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private static string CurveTypeNameWithSegment(CurveInfo curveInfo)
   {
     string baseType = CurveTypeName(curveInfo.Curve);
+    if (curveInfo.IsEdge)
+      return $"{baseType} edge";
     if (curveInfo.IsSegment)
       return $"{baseType} segment";
     return baseType;
@@ -1862,71 +1881,33 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
     foreach (var obj in objects)
     {
-      if (obj.Geometry is not Curve curve)
-        continue;
-
-      // Check if this object has selected subobjects (segments)
       var selectedSubObjects = obj.GetSelectedSubObjects();
       if (selectedSubObjects != null && selectedSubObjects.Length > 0)
       {
-        hasSegmentSelection = true;
         Log.Write($"GetInfoCurvesForSelection: Object {obj.Id} has {selectedSubObjects.Length} selected subobjects");
-        
-        // Extract the actual segment curves from the selected subobjects
+
+        bool addedSubcurve = false;
         foreach (var componentIndex in selectedSubObjects)
         {
           Log.Write($"GetInfoCurvesForSelection: ComponentIndex Type={componentIndex.ComponentIndexType} Index={componentIndex.Index}");
-          
-          if (curve is PolyCurve polyCurve && componentIndex.Index >= 0)
+
+          if (TryGetSelectedSubcurve(obj, componentIndex, out CurveInfo? curveInfo) && curveInfo != null)
           {
-            // Get the specific segment from the polycurve
-            var segment = polyCurve.SegmentCurve(componentIndex.Index);
-            if (segment != null)
-            {
-              curveInfos.Add(new CurveInfo
-              {
-                Curve = segment,
-                ParentObject = obj,
-                IsSegment = true,
-                SegmentIndex = componentIndex.Index
-              });
-              Log.Write($"GetInfoCurvesForSelection: Added PolyCurve segment {componentIndex.Index}, length={segment.GetLength()}");
-            }
-          }
-          else if (curve is Rhino.Geometry.PolylineCurve polyline && componentIndex.Index >= 0)
-          {
-            // Get the specific line segment from the polyline
-            var pl = polyline.ToPolyline();
-            if (pl != null && componentIndex.Index < pl.Count - 1)
-            {
-              var lineSegment = new Rhino.Geometry.LineCurve(pl[componentIndex.Index], pl[componentIndex.Index + 1]);
-              curveInfos.Add(new CurveInfo
-              {
-                Curve = lineSegment,
-                ParentObject = obj,
-                IsSegment = true,
-                SegmentIndex = componentIndex.Index
-              });
-              Log.Write($"GetInfoCurvesForSelection: Added Polyline segment {componentIndex.Index}, length={lineSegment.GetLength()}");
-            }
-          }
-          else
-          {
-            // For other curve types or invalid indices, use the whole curve
-            Log.Write($"GetInfoCurvesForSelection: Unsupported curve type or invalid index, using whole curve");
-            curveInfos.Add(new CurveInfo
-            {
-              Curve = curve,
-              ParentObject = obj,
-              IsSegment = false,
-              SegmentIndex = -1
-            });
+            curveInfos.Add(curveInfo);
+            addedSubcurve = true;
+            Log.Write($"GetInfoCurvesForSelection: Added {(curveInfo.IsEdge ? "Brep edge" : "curve segment")} {componentIndex.Index}, length={curveInfo.Curve.GetLength()}");
           }
         }
+
+        if (addedSubcurve)
+        {
+          hasSegmentSelection = true;
+          continue;
+        }
       }
-      else
+
+      if (obj.Geometry is Curve curve)
       {
-        // No segment selection, use the whole curve
         curveInfos.Add(new CurveInfo
         {
           Curve = curve,
@@ -1938,6 +1919,63 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     }
 
     return curveInfos;
+  }
+
+  private static bool TryGetSelectedSubcurve(RhinoObject obj, ComponentIndex componentIndex, out CurveInfo? curveInfo)
+  {
+    curveInfo = null;
+    if (componentIndex.Index < 0)
+      return false;
+
+    if (obj.Geometry is PolyCurve polyCurve)
+    {
+      var segment = polyCurve.SegmentCurve(componentIndex.Index);
+      if (segment == null)
+        return false;
+
+      curveInfo = new CurveInfo
+      {
+        Curve = segment,
+        ParentObject = obj,
+        IsSegment = true,
+        SegmentIndex = componentIndex.Index
+      };
+      return true;
+    }
+
+    if (obj.Geometry is PolylineCurve polyline)
+    {
+      var points = polyline.ToPolyline();
+      if (points == null || componentIndex.Index >= points.Count - 1)
+        return false;
+
+      curveInfo = new CurveInfo
+      {
+        Curve = new LineCurve(points[componentIndex.Index], points[componentIndex.Index + 1]),
+        ParentObject = obj,
+        IsSegment = true,
+        SegmentIndex = componentIndex.Index
+      };
+      return true;
+    }
+
+    if (obj.Geometry is Brep brep &&
+        componentIndex.ComponentIndexType == ComponentIndexType.BrepEdge &&
+        componentIndex.Index < brep.Edges.Count)
+    {
+      Curve edgeCurve = brep.Edges[componentIndex.Index].DuplicateCurve();
+      curveInfo = new CurveInfo
+      {
+        Curve = edgeCurve,
+        ParentObject = obj,
+        IsSegment = true,
+        IsEdge = true,
+        SegmentIndex = componentIndex.Index
+      };
+      return true;
+    }
+
+    return false;
   }
 
   private void RefreshFromCurrentSelection()
@@ -5165,34 +5203,110 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     };
   }
 
-  private static Control NewSectionLabel(string text, params Control[] rightControls)
+  private GroupBox CreateCollapsibleSection(string title, Control content,
+    Func<bool> getCollapsed, Action<bool> setCollapsed)
   {
-    var rightGroup = new StackLayout
-    {
-      Orientation = Orientation.Horizontal,
-      Spacing = 4,
-      Items = { }
-    };
+    var group = new GroupBox { Text = "", Content = content };
+    InstallCollapsibleGroupHeader(group, content, title, getCollapsed, setCollapsed);
+    return group;
+  }
 
-    foreach (Control rightControl in rightControls)
+  private void InstallCollapsibleGroupHeader(GroupBox group, Control content, string title,
+    Func<bool> getCollapsed, Action<bool> setCollapsed)
+  {
+    System.Windows.Controls.StackPanel? headerPanel = null;
+    System.Windows.Controls.Button? collapseButton = null;
+    System.Windows.Controls.GroupBox? nativeGroup = null;
+
+    static System.Windows.Shapes.Polyline DisclosureChevron(bool collapsed)
     {
-      if (rightControl != null)
-        rightGroup.Items.Add(new StackLayoutItem(rightControl, false));
+      var points = new System.Windows.Media.PointCollection();
+      if (collapsed)
+      {
+        points.Add(new System.Windows.Point(4, 2));
+        points.Add(new System.Windows.Point(8, 6));
+        points.Add(new System.Windows.Point(4, 10));
+      }
+      else
+      {
+        points.Add(new System.Windows.Point(2, 4));
+        points.Add(new System.Windows.Point(6, 8));
+        points.Add(new System.Windows.Point(10, 4));
+      }
+
+      return new System.Windows.Shapes.Polyline
+      {
+        Points = points,
+        Stroke = System.Windows.SystemColors.ControlTextBrush,
+        StrokeThickness = 1.5,
+        StrokeLineJoin = System.Windows.Media.PenLineJoin.Round,
+        StrokeStartLineCap = System.Windows.Media.PenLineCap.Round,
+        StrokeEndLineCap = System.Windows.Media.PenLineCap.Round,
+        Width = 12,
+        Height = 12,
+      };
     }
 
-    return new TableLayout
+    void ApplyCollapsedState()
     {
-      Padding = new Padding(0, 0, 0, 0),
-      Spacing = new Size(4, 0),
-      Rows =
+      bool collapsed = getCollapsed();
+      content.Visible = !collapsed;
+      if (collapseButton != null)
       {
-        new TableRow(
-          new TableCell(new Label { Text = text }, false),
-          new TableCell(new Panel(), true),
-          new TableCell(rightGroup, false)
-        )
+        collapseButton.Content = DisclosureChevron(collapsed);
+        collapseButton.ToolTip = collapsed ? $"Restore {title}" : $"Collapse {title}";
       }
-    };
+
+      nativeGroup?.InvalidateMeasure();
+    }
+
+    void Install()
+    {
+      if (group.ControlObject is not System.Windows.Controls.GroupBox native)
+        return;
+
+      nativeGroup = native;
+      if (headerPanel == null)
+      {
+        headerPanel = new System.Windows.Controls.StackPanel
+        {
+          Orientation = System.Windows.Controls.Orientation.Horizontal,
+          VerticalAlignment = System.Windows.VerticalAlignment.Center,
+        };
+
+        collapseButton = new System.Windows.Controls.Button
+        {
+          Content = DisclosureChevron(getCollapsed()),
+          Width = 18,
+          Height = 18,
+          Padding = new System.Windows.Thickness(0),
+          Margin = new System.Windows.Thickness(0, 0, 3, 0),
+          Background = System.Windows.Media.Brushes.Transparent,
+          BorderBrush = System.Windows.Media.Brushes.Transparent,
+          HorizontalContentAlignment = System.Windows.HorizontalAlignment.Center,
+          VerticalContentAlignment = System.Windows.VerticalAlignment.Center,
+          Focusable = false,
+        };
+        collapseButton.Click += (_, _) =>
+        {
+          setCollapsed(!getCollapsed());
+          ApplyCollapsedState();
+        };
+        headerPanel.Children.Add(collapseButton);
+        headerPanel.Children.Add(new System.Windows.Controls.TextBlock
+        {
+          Text = title,
+          VerticalAlignment = System.Windows.VerticalAlignment.Center,
+        });
+      }
+
+      native.Header = headerPanel;
+      ApplyCollapsedState();
+    }
+
+    content.Visible = !getCollapsed();
+    Install();
+    group.Load += (_, _) => Install();
   }
 
   private static Control NewRule()
