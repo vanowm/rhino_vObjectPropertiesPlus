@@ -81,9 +81,11 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private readonly ToggleButton _textVAlignTopBtn, _textVAlignMiddleBtn, _textVAlignBottomBtn;
   private readonly ToggleButton _textBoldBtn, _textItalicBtn, _textUnderlineBtn;
   private readonly DropDown _textFontDrop;
+  private readonly Label _textHeightLabel;
   private readonly NumericStepper _textHeightStepper;
   private readonly DropDown _textHeightUnitDrop;
   private readonly TextArea _textContentArea;
+  private readonly Panel _textAlignStylePanel;
   private readonly UITimer _textContentTimer = new UITimer { Interval = 0.4 };
   private readonly Control _infoPlusSection;
   private readonly GroupBox _textSection;
@@ -205,6 +207,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _textFontDrop = new DropDown { Height = RowHeight, Width = ValueWidth };
     foreach (var ff in System.Drawing.FontFamily.Families.OrderBy(f => f.Name))
       _textFontDrop.Items.Add(new ListItem { Text = ff.Name, Key = ff.Name });
+    _textHeightLabel = new Label { Text = "Height", Width = LabelWidth };
     _textHeightStepper = NewNumericStepper(0, 100000, 0.1, 4);
     _textHeightStepper.Width = InfoNumericValueWidth;
     _textHeightUnitDrop = NewUnitDropDown();
@@ -395,11 +398,11 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       Rows =
       {
         NewValueRow("Font", _textFontDrop),
-        NewValueWithUnitDropRow("Height", _textHeightStepper, _textHeightUnitDrop),
+        NewDynamicValueWithUnitDropRow(_textHeightLabel, _textHeightStepper, _textHeightUnitDrop),
       }
     };
 
-    var alignStylePanel = new Panel
+    _textAlignStylePanel = new Panel
     {
       Padding = new Eto.Drawing.Padding(10, 1, 6, 1),
       Content = new StackLayout
@@ -430,7 +433,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       Rows =
       {
         new TableRow(new TableCell(textTable, true)),
-        new TableRow(new TableCell(alignStylePanel, true)),
+        new TableRow(new TableCell(_textAlignStylePanel, true)),
         new TableRow(new TableCell(new Panel { Content = _textContentArea, Padding = new Eto.Drawing.Padding(10, 2, 6, 2) }, true)),
       }
     };
@@ -5615,16 +5618,60 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     return NewBorderedRow(new Label { Text = "Style", Width = LabelWidth }, row);
   }
 
-  private static DimensionStyle GetEffectiveTextDimStyle(TextEntity te, RhinoDoc? doc)
+  private static DimensionStyle GetEffectiveTextDimStyle(AnnotationBase annotation, RhinoDoc? doc)
   {
     if (doc == null) return new DimensionStyle();
-    var baseId = te.DimensionStyleId != Guid.Empty ? te.DimensionStyleId : doc.DimStyles.Current.Id;
+    var baseId = annotation.DimensionStyleId != Guid.Empty ? annotation.DimensionStyleId : doc.DimStyles.Current.Id;
     var parent = doc.DimStyles.FindId(baseId) ?? doc.DimStyles.Current;
-    return te.GetDimensionStyle(parent);
+    return annotation.GetDimensionStyle(parent);
   }
 
+  private static bool IsTextRelatedGeometry(GeometryBase geometry)
+  {
+    return geometry is TextEntity
+      || geometry is TextDot
+      || geometry is Leader
+      || geometry is Dimension;
+  }
 
-  private void ApplyToTextObjects(Action<TextEntity> apply, bool refresh = true)
+  private static bool SupportsTextAlignment(GeometryBase geometry)
+  {
+    return geometry is TextEntity || geometry is Leader;
+  }
+
+  private static string TextRelatedContent(GeometryBase geometry)
+  {
+    return geometry switch
+    {
+      TextDot dot when !string.IsNullOrEmpty(dot.SecondaryText) => $"{dot.Text}\n{dot.SecondaryText}",
+      TextDot dot => dot.Text ?? string.Empty,
+      Dimension dimension => dimension.TextFormula ?? dimension.PlainUserText ?? string.Empty,
+      AnnotationBase annotation => annotation.PlainText ?? string.Empty,
+      _ => string.Empty
+    };
+  }
+
+  private static void SetTextRelatedContent(GeometryBase geometry, string content)
+  {
+    switch (geometry)
+    {
+      case TextDot dot:
+        string normalized = NormalizeTextLineEndings(content);
+        int lineBreak = normalized.IndexOf('\n');
+        dot.Text = lineBreak < 0 ? normalized : normalized[..lineBreak];
+        dot.SecondaryText = lineBreak < 0 ? string.Empty : normalized[(lineBreak + 1)..];
+        break;
+      case Dimension dimension:
+        dimension.TextFormula = content;
+        break;
+      case AnnotationBase annotation:
+        annotation.PlainText = content;
+        break;
+    }
+  }
+
+  private void ApplyToTextRelatedObjects(Func<GeometryBase, bool> appliesTo,
+    Action<GeometryBase> apply, bool refresh = true)
   {
     if (_doc == null) return;
     uint undoRecord = _doc.BeginUndoRecord("Properties+ Text");
@@ -5633,11 +5680,11 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     {
       foreach (var obj in SelectedRhinoObjects())
       {
-        if (obj.Geometry is not TextEntity te) continue;
-        var dup = te.Duplicate() as TextEntity;
-        if (dup == null) continue;
-        apply(dup);
-        if (_doc.Objects.Replace(obj.Id, dup)) changed = true;
+        if (!appliesTo(obj.Geometry)) continue;
+        var duplicate = obj.Geometry.Duplicate();
+        if (duplicate == null) continue;
+        apply(duplicate);
+        if (_doc.Objects.Replace(obj.Id, duplicate, false)) changed = true;
       }
     }
     finally
@@ -5646,9 +5693,6 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     }
     if (changed)
     {
-      // Refresh the conduit reference before Redraw so DrawOverlay never
-      // touches a stale RhinoObject whose native C++ peer may have been freed
-      // by the Replace above (second replace in the same focus session).
       if (_focusHighlightConduit.Enabled && _focusedObjectId != Guid.Empty)
       {
         var fresh = _doc.Objects.FindId(_focusedObjectId);
@@ -5662,7 +5706,11 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
   private void UpdateTextSection(List<RhinoObject> objectList, RhinoDoc? doc)
   {
-    bool hasText = objectList.Any(o => o.Geometry is TextEntity);
+    var textGeometries = objectList
+      .Select(o => o.Geometry)
+      .Where(IsTextRelatedGeometry)
+      .ToList();
+    bool hasText = textGeometries.Count > 0;
     _textSection.Visible = hasText;
     if (!hasText) return;
 
@@ -5670,63 +5718,100 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _isUpdatingUi = true;
     try
     {
-      var texts = objectList
-        .Select(o => o.Geometry as TextEntity)
-        .Where(t => t != null).Cast<TextEntity>().ToList();
-      if (texts.Count == 0) return;
-
-      var fontNames = texts.Select(t =>
-        t.FirstCharFont?.EnglishFamilyName ?? t.Font?.EnglishFamilyName ?? ""
-      ).Distinct().ToList();
+      var annotations = textGeometries.OfType<AnnotationBase>().ToList();
+      var textDots = textGeometries.OfType<TextDot>().ToList();
+      var fontNames = textGeometries.Select(geometry => geometry switch
+      {
+        TextDot dot => dot.FontFace ?? string.Empty,
+        AnnotationBase annotation => annotation.FirstCharFont?.EnglishFamilyName
+          ?? annotation.Font?.EnglishFamilyName
+          ?? string.Empty,
+        _ => string.Empty
+      }).Distinct().ToList();
       string fontKey = fontNames.Count == 1 ? fontNames[0] : "";
       _textFontDrop.SelectedKey = fontKey;
+      SetControlEnabled(_textFontDrop, true);
 
       var modelUnits = doc?.ModelUnitSystem ?? UnitSystem.None;
       var units = GetSelectedUnitSystem(_textHeightUnitDrop, doc);
-      // GetEffectiveTextDimStyle returns the style's base height, not the per-object TextHeight override.
-      var heights = texts.Select(t => {
-        double h = t.TextHeight;
-        if (h <= 0) h = GetEffectiveTextDimStyle(t, doc).TextHeight;
-        return ConvertLength(h, modelUnits, units);
-      }).ToList();
+      bool dotsOnly = textDots.Count == textGeometries.Count;
+      bool annotationsOnly = annotations.Count == textGeometries.Count;
+      _textHeightLabel.Text = dotsOnly ? "Font size" : "Height";
+      _textHeightUnitDrop.Visible = !dotsOnly;
+      _textHeightUnitDrop.Enabled = annotationsOnly;
+      _textHeightStepper.Enabled = dotsOnly || annotationsOnly;
+      _textHeightStepper.DecimalPlaces = dotsOnly ? 0 : 4;
+      _textHeightStepper.Increment = dotsOnly ? 1 : 0.1;
+
+      var heights = dotsOnly
+        ? textDots.Select(dot => (double)dot.FontHeight).ToList()
+        : annotationsOnly
+          ? annotations.Select(annotation =>
+          {
+            double height = annotation.TextHeight;
+            if (height <= 0) height = GetEffectiveTextDimStyle(annotation, doc).TextHeight;
+            return ConvertLength(height, modelUnits, units);
+          }).ToList()
+          : new List<double>();
       bool heightsSame = heights.Count > 0 && heights.All(h => RhinoMath.EpsilonEquals(h, heights[0], RhinoMath.SqrtEpsilon));
-      // Don't override the stepper while the user is mid-edit; a spurious refresh
-      // (e.g. from a Rhino event fired synchronously during the apply) would wipe
-      // the value they just typed before it has been committed to the document.
       if (!_textHeightUserEditing)
         _textHeightStepper.Value = heightsSame ? heights[0] : 0;
 
-      var hAligns = texts.Select(t => t.TextHorizontalAlignment).Distinct().ToList();
+      var alignmentGeometries = textGeometries.Where(SupportsTextAlignment).ToList();
+      bool hasAlignment = alignmentGeometries.Count > 0;
+      var hAligns = alignmentGeometries.Select(geometry => geometry switch
+      {
+        TextEntity text => text.TextHorizontalAlignment,
+        Leader leader => leader.LeaderTextHorizontalAlignment,
+        _ => TextHorizontalAlignment.Auto
+      }).Distinct().ToList();
+      SetControlEnabled(_textAlignLeftBtn, hasAlignment);
+      SetControlEnabled(_textAlignCenterBtn, hasAlignment);
+      SetControlEnabled(_textAlignRightBtn, hasAlignment);
+      SetControlEnabled(_textAlignAutoBtn, hasAlignment);
       _textAlignLeftBtn.Checked = hAligns.Count == 1 && hAligns[0] == TextHorizontalAlignment.Left;
       _textAlignCenterBtn.Checked = hAligns.Count == 1 && hAligns[0] == TextHorizontalAlignment.Center;
       _textAlignRightBtn.Checked = hAligns.Count == 1 && hAligns[0] == TextHorizontalAlignment.Right;
       _textAlignAutoBtn.Checked = hAligns.Count == 1 && hAligns[0] == TextHorizontalAlignment.Auto;
-      _textContentArea.TextAlignment = (hAligns.Count == 1 && hAligns[0] == TextHorizontalAlignment.Center) ? TextAlignment.Center
-                                     : (hAligns.Count == 1 && hAligns[0] == TextHorizontalAlignment.Right)  ? TextAlignment.Right
-                                     : TextAlignment.Left;
+      _textContentArea.TextAlignment = hAligns.Count == 1 && hAligns[0] == TextHorizontalAlignment.Center
+        ? TextAlignment.Center
+        : hAligns.Count == 1 && hAligns[0] == TextHorizontalAlignment.Right
+          ? TextAlignment.Right
+          : TextAlignment.Left;
 
-      var vAligns = texts.Select(t => t.TextVerticalAlignment).Distinct().ToList();
+      var vAligns = alignmentGeometries.Select(geometry => geometry switch
+      {
+        TextEntity text => text.TextVerticalAlignment,
+        Leader leader => leader.LeaderTextVerticalAlignment,
+        _ => TextVerticalAlignment.Middle
+      }).Distinct().ToList();
+      SetControlEnabled(_textVAlignTopBtn, hasAlignment);
+      SetControlEnabled(_textVAlignMiddleBtn, hasAlignment);
+      SetControlEnabled(_textVAlignBottomBtn, hasAlignment);
       _textVAlignTopBtn.Checked = vAligns.Count == 1 && vAligns[0] == TextVerticalAlignment.Top;
       _textVAlignMiddleBtn.Checked = vAligns.Count == 1 && vAligns[0] == TextVerticalAlignment.Middle;
       _textVAlignBottomBtn.Checked = vAligns.Count == 1 && vAligns[0] == TextVerticalAlignment.Bottom;
 
-      var bolds = texts.Select(t => t.IsAllBold()).Distinct().ToList();
-      var italics = texts.Select(t => t.IsAllItalic()).Distinct().ToList();
-      var underlines = texts.Select(t => t.IsAllUnderlined()).Distinct().ToList();
+      bool hasStyle = annotations.Count > 0;
+      SetControlEnabled(_textBoldBtn, hasStyle);
+      SetControlEnabled(_textItalicBtn, hasStyle);
+      SetControlEnabled(_textUnderlineBtn, hasStyle);
+      _textAlignStylePanel.Visible = hasAlignment || hasStyle;
+      var bolds = annotations.Select(annotation => annotation.IsAllBold()).Distinct().ToList();
+      var italics = annotations.Select(annotation => annotation.IsAllItalic()).Distinct().ToList();
+      var underlines = annotations.Select(annotation => annotation.IsAllUnderlined()).Distinct().ToList();
       _textBoldBtn.Checked = bolds.Count == 1 && bolds[0];
       _textItalicBtn.Checked = italics.Count == 1 && italics[0];
       _textUnderlineBtn.Checked = underlines.Count == 1 && underlines[0];
 
-      {
-        bool tb = bolds.Count == 1 && bolds[0];
-        bool ti = italics.Count == 1 && italics[0];
-        bool tu = underlines.Count == 1 && underlines[0];
-        string tf = fontKey.Length > 0 ? fontKey : new Eto.Drawing.Font(SystemFont.Default).FamilyName;
-        var ts = (tb ? FontStyle.Bold : FontStyle.None) | (ti ? FontStyle.Italic : FontStyle.None);
-        _textContentArea.Font = new Eto.Drawing.Font(tf, 9f, ts, tu ? FontDecoration.Underline : FontDecoration.None);
-      }
+      bool tb = bolds.Count == 1 && bolds[0];
+      bool ti = italics.Count == 1 && italics[0];
+      bool tu = underlines.Count == 1 && underlines[0];
+      string tf = fontKey.Length > 0 ? fontKey : new Eto.Drawing.Font(SystemFont.Default).FamilyName;
+      var ts = (tb ? FontStyle.Bold : FontStyle.None) | (ti ? FontStyle.Italic : FontStyle.None);
+      _textContentArea.Font = new Eto.Drawing.Font(tf, 9f, ts, tu ? FontDecoration.Underline : FontDecoration.None);
 
-      var contents = texts.Select(t => t.PlainText ?? "").Distinct().ToList();
+      var contents = textGeometries.Select(TextRelatedContent).Distinct().ToList();
       string contentText = contents.Count == 1 ? contents[0] : "";
       if (TextContentEquivalent(_textContentArea.Text ?? "", contentText))
         _textContentDirty = false;
@@ -5801,7 +5886,13 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     if (_isUpdatingUi || _doc == null) return;
     string face = _textFontDrop.SelectedKey ?? "";
     if (string.IsNullOrEmpty(face)) return;
-    ApplyToTextObjects(te => te.SetFacename(true, face));
+    ApplyToTextRelatedObjects(IsTextRelatedGeometry, geometry =>
+    {
+      if (geometry is TextDot dot)
+        dot.FontFace = face;
+      else if (geometry is AnnotationBase annotation)
+        annotation.SetFacename(true, face);
+    });
   }
 
   private void ApplyTextHeight()
@@ -5811,49 +5902,91 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     if (h <= 0) return;
     var modelUnits = _doc.ModelUnitSystem;
     var units = GetSelectedUnitSystem(_textHeightUnitDrop, _doc);
-    double hModel = ConvertLength(h, units, modelUnits);
-    // refresh:false — ValueChanged fires on every keystroke; refreshing would read back the
-    // document default and reset the stepper before multi-digit input can complete.
-    ApplyToTextObjects(te => { te.TextHeight = Math.Max(hModel, RhinoMath.ZeroTolerance); }, refresh: false);
+    var selectedTextGeometries = SelectedRhinoObjects()
+      .Select(o => o.Geometry)
+      .Where(IsTextRelatedGeometry)
+      .ToList();
+    bool dotsOnly = selectedTextGeometries.Count > 0
+      && selectedTextGeometries.All(geometry => geometry is TextDot);
+    bool annotationsOnly = selectedTextGeometries.Count > 0
+      && selectedTextGeometries.All(geometry => geometry is AnnotationBase);
+    if (!dotsOnly && !annotationsOnly) return;
+
+    // ValueChanged fires on every keystroke; refreshing here would replace a partial value.
+    if (dotsOnly)
+    {
+      int fontHeight = Math.Max(1, (int)Math.Round(h));
+      ApplyToTextRelatedObjects(geometry => geometry is TextDot,
+        geometry => ((TextDot)geometry).FontHeight = fontHeight, refresh: false);
+    }
+    else
+    {
+      double hModel = ConvertLength(h, units, modelUnits);
+      ApplyToTextRelatedObjects(geometry => geometry is AnnotationBase,
+        geometry => ((AnnotationBase)geometry).TextHeight = Math.Max(hModel, RhinoMath.ZeroTolerance),
+        refresh: false);
+    }
   }
 
   private void ApplyTextHAlignment(TextHorizontalAlignment alignment)
   {
     if (_isUpdatingUi || _doc == null) return;
-    ApplyToTextObjects(te => { te.TextHorizontalAlignment = alignment; });
+    ApplyToTextRelatedObjects(SupportsTextAlignment, geometry =>
+    {
+      if (geometry is TextEntity text)
+        text.TextHorizontalAlignment = alignment;
+      else if (geometry is Leader leader)
+        leader.LeaderTextHorizontalAlignment = alignment;
+    });
   }
 
   private void ApplyTextVAlignment(TextVerticalAlignment alignment)
   {
     if (_isUpdatingUi || _doc == null) return;
-    ApplyToTextObjects(te => { te.TextVerticalAlignment = alignment; });
+    ApplyToTextRelatedObjects(SupportsTextAlignment, geometry =>
+    {
+      if (geometry is TextEntity text)
+        text.TextVerticalAlignment = alignment;
+      else if (geometry is Leader leader)
+        leader.LeaderTextVerticalAlignment = alignment;
+    });
   }
 
   private void ApplyTextBold()
   {
     if (_isUpdatingUi || _doc == null) return;
-    bool allBold = SelectedRhinoObjects().Where(o => o.Geometry is TextEntity).All(o => ((TextEntity)o.Geometry!).IsAllBold());
-    ApplyToTextObjects(te => te.SetBold(!allBold));
+    var annotations = SelectedRhinoObjects().Select(o => o.Geometry).OfType<AnnotationBase>().ToList();
+    if (annotations.Count == 0) return;
+    bool allBold = annotations.All(annotation => annotation.IsAllBold());
+    ApplyToTextRelatedObjects(geometry => geometry is AnnotationBase,
+      geometry => ((AnnotationBase)geometry).SetBold(!allBold));
   }
 
   private void ApplyTextItalic()
   {
     if (_isUpdatingUi || _doc == null) return;
-    bool allItalic = SelectedRhinoObjects().Where(o => o.Geometry is TextEntity).All(o => ((TextEntity)o.Geometry!).IsAllItalic());
-    ApplyToTextObjects(te => te.SetItalic(!allItalic));
+    var annotations = SelectedRhinoObjects().Select(o => o.Geometry).OfType<AnnotationBase>().ToList();
+    if (annotations.Count == 0) return;
+    bool allItalic = annotations.All(annotation => annotation.IsAllItalic());
+    ApplyToTextRelatedObjects(geometry => geometry is AnnotationBase,
+      geometry => ((AnnotationBase)geometry).SetItalic(!allItalic));
   }
 
   private void ApplyTextUnderline()
   {
     if (_isUpdatingUi || _doc == null) return;
-    bool allUnderlined = SelectedRhinoObjects().Where(o => o.Geometry is TextEntity).All(o => ((TextEntity)o.Geometry!).IsAllUnderlined());
-    ApplyToTextObjects(te => te.SetUnderline(!allUnderlined));
+    var annotations = SelectedRhinoObjects().Select(o => o.Geometry).OfType<AnnotationBase>().ToList();
+    if (annotations.Count == 0) return;
+    bool allUnderlined = annotations.All(annotation => annotation.IsAllUnderlined());
+    ApplyToTextRelatedObjects(geometry => geometry is AnnotationBase,
+      geometry => ((AnnotationBase)geometry).SetUnderline(!allUnderlined));
   }
 
   private void ApplyTextContent()
   {
     if (_isUpdatingUi || _doc == null) return;
     string content = _textContentArea.Text ?? "";
-    ApplyToTextObjects(te => { te.PlainText = content; }, refresh: false);
+    ApplyToTextRelatedObjects(IsTextRelatedGeometry,
+      geometry => SetTextRelatedContent(geometry, content), refresh: false);
   }
 }
