@@ -87,6 +87,9 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private readonly UITimer _textContentTimer = new UITimer { Interval = 0.4 };
   private readonly Control _infoPlusSection;
   private readonly GroupBox _textSection;
+  private readonly GroupBox _meshSection;
+  private readonly GroupBox _renderingSection;
+  private readonly GroupBox _isocurveSection;
 
   private bool _generalSectionCollapsed;
   private bool _textSectionCollapsed;
@@ -439,13 +442,13 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       () => _textSectionCollapsed,
       value => SetSectionCollapsed(TextSectionCollapsedKey, ref _textSectionCollapsed, value));
     _textSection.Visible = false;
-    var meshSection = CreateCollapsibleSection("Render Mesh Settings", meshTable,
+    _meshSection = CreateCollapsibleSection("Render Mesh Settings", meshTable,
       () => _meshSectionCollapsed,
       value => SetSectionCollapsed(MeshSectionCollapsedKey, ref _meshSectionCollapsed, value));
-    var renderingSection = CreateCollapsibleSection("Rendering", renderingTable,
+    _renderingSection = CreateCollapsibleSection("Rendering", renderingTable,
       () => _renderingSectionCollapsed,
       value => SetSectionCollapsed(RenderingSectionCollapsedKey, ref _renderingSectionCollapsed, value));
-    var isocurveSection = CreateCollapsibleSection("Isocurve Density", isocurveTable,
+    _isocurveSection = CreateCollapsibleSection("Isocurve Density", isocurveTable,
       () => _isocurveSectionCollapsed,
       value => SetSectionCollapsed(IsocurveSectionCollapsedKey, ref _isocurveSectionCollapsed, value));
 
@@ -460,9 +463,9 @@ public sealed class vObjectPropertiesPlusPanel : Panel
         _infoPlusSection,
         generalSection,
         _textSection,
-        meshSection,
-        renderingSection,
-        isocurveSection,
+        _meshSection,
+        _renderingSection,
+        _isocurveSection,
         new StackLayout
         {
           Orientation = Orientation.Horizontal,
@@ -934,6 +937,12 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     bool customMeshApplicable = objectList.All(o => SupportsCustomMesh(o));
     _customMeshCheck.Enabled = customMeshApplicable;
     _customMeshAdjustButton.Enabled = customMeshApplicable;
+    _meshSection.Visible = customMeshApplicable;
+
+    bool renderingApplicable = objectList.All(SupportsRendering);
+    _castsShadowsCheck.Enabled = renderingApplicable;
+    _receivesShadowsCheck.Enabled = renderingApplicable;
+    _renderingSection.Visible = renderingApplicable;
 
     bool isoApplicable = objectList.All(SupportsIsocurve);
     string densityText = CommonOrVaries(objectList, o => WireDensityText(o.Attributes));
@@ -941,12 +950,14 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     SetCheckState(_showIsocurveCheck, showIso);
     _showIsocurveCheck.Enabled = isoApplicable;
     _densityStepper.Enabled = isoApplicable && showIso == true;
+    _isocurveSection.Visible = isoApplicable;
     if (TryParseDouble(densityText, out double densityValue))
       _densityStepper.Value = densityValue;
     else
       _densityStepper.Value = -1;
 
     _currentCurveInfos = GetInfoCurvesForSelection(objectList, out bool hasSegmentSelection);
+    _infoPlusSection.Visible = _currentCurveInfos.Count > 0;
     bool hasReadOnlyEdgeSelection = _currentCurveInfos.Any(ci => ci.IsEdge);
     _curveMetricBox.ReadOnly = hasReadOnlyEdgeSelection;
     _radiusBox.ReadOnly = hasReadOnlyEdgeSelection;
@@ -1331,8 +1342,11 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _polygonSidesStepper.Visible = false;
     DisableRectangleSideHighlight();
 
-    _infoPlusSection.Visible = true;
+    _infoPlusSection.Visible = false;
     _textSection.Visible = false;
+    _meshSection.Visible = false;
+    _renderingSection.Visible = false;
+    _isocurveSection.Visible = false;
     _textFontDrop.SelectedIndex = -1;
     SetControlEnabled(_textFontDrop, false);
     SetControlEnabled(_textHeightStepper, false);
@@ -1385,15 +1399,40 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     if (objects.Count == 0)
       return "-";
 
-    if (objects.Count == 1)
-      return TypeName(objects[0]);
+    var typeNames = objects.SelectMany(SelectionTypeNames).ToList();
+    if (typeNames.Count == 0)
+      return "-";
 
-    string firstName = TypeName(objects[0]);
-    bool allSameType = objects.All(o => TypeName(o) == firstName);
+    string firstName = typeNames[0];
+    bool allSameType = typeNames.All(name => name == firstName);
     if (allSameType)
-      return $"{objects.Count} {Pluralize(firstName, objects.Count)}";
+      return typeNames.Count == 1
+        ? firstName
+        : $"{typeNames.Count} {Pluralize(firstName, typeNames.Count)}";
 
     return "varies";
+  }
+
+  private static IEnumerable<string> SelectionTypeNames(RhinoObject obj)
+  {
+    var selectedComponents = obj.GetSelectedSubObjects();
+    if (selectedComponents != null && selectedComponents.Length > 0)
+    {
+      var componentNames = selectedComponents
+        .Select(componentIndex => ComponentTypeName(obj, componentIndex))
+        .Where(name => !string.IsNullOrEmpty(name))
+        .Cast<string>()
+        .ToList();
+
+      if (componentNames.Count > 0)
+      {
+        foreach (string componentName in componentNames)
+          yield return componentName;
+        yield break;
+      }
+    }
+
+    yield return TypeName(obj);
   }
 
   private static string BuildSegmentTypeText(IReadOnlyList<CurveInfo> curveInfos)
@@ -1423,9 +1462,10 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
   private static string CurveTypeNameWithSegment(CurveInfo curveInfo)
   {
-    string baseType = CurveTypeName(curveInfo.Curve);
     if (curveInfo.IsEdge)
-      return $"{baseType} edge";
+      return $"{BrepOwnerTypeName(curveInfo.ParentObject)} edge";
+
+    string baseType = CurveTypeName(curveInfo.Curve);
     if (curveInfo.IsSegment)
       return $"{baseType} segment";
     return baseType;
@@ -1436,8 +1476,10 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     if (obj.ObjectType == ObjectType.Curve)
       return obj.Geometry is Curve c ? CurveTypeName(c) : "curve";
 
-    return obj.Geometry switch
+    string? explicitName = obj.Geometry switch
     {
+      Brep brep     => BrepTypeName(brep),
+      Surface       => "surface",
       TextEntity    => "text",
       TextDot       => "text dot",
       AngularDimension => "angle dim",
@@ -1445,8 +1487,66 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       Centermark    => "centermark",
       Dimension     => "dimension",
       Leader        => "leader",
-      _             => obj.ObjectType.ToString().Replace("_", " ").ToLowerInvariant()
+      _             => null
     };
+
+    if (explicitName != null)
+      return explicitName;
+
+    string shortDescription = obj.ShortDescription(false)?.Trim() ?? string.Empty;
+    return shortDescription.Length > 0
+      ? shortDescription.ToLowerInvariant()
+      : obj.ObjectType.ToString().Replace("_", " ").ToLowerInvariant();
+  }
+
+  private static string? ComponentTypeName(RhinoObject obj, ComponentIndex componentIndex)
+  {
+    string brepOwnerType = BrepOwnerTypeName(obj);
+    return componentIndex.ComponentIndexType switch
+    {
+      ComponentIndexType.BrepVertex => $"{brepOwnerType} vertex",
+      ComponentIndexType.BrepEdge => $"{brepOwnerType} edge",
+      ComponentIndexType.BrepFace => $"{brepOwnerType} face",
+      ComponentIndexType.BrepTrim => $"{brepOwnerType} trim",
+      ComponentIndexType.BrepLoop => $"{brepOwnerType} loop",
+      ComponentIndexType.MeshVertex => "mesh vertex",
+      ComponentIndexType.MeshTopologyVertex => "mesh vertex",
+      ComponentIndexType.MeshTopologyEdge => "mesh edge",
+      ComponentIndexType.MeshFace => "mesh face",
+      ComponentIndexType.MeshNgon => "mesh ngon",
+      ComponentIndexType.InstanceDefinitionPart => "block object",
+      ComponentIndexType.PolycurveSegment => "curve segment",
+      ComponentIndexType.PointCloudPoint => "point cloud point",
+      ComponentIndexType.GroupMember => "group member",
+      ComponentIndexType.ExtrusionBottomProfile => "extrusion edge",
+      ComponentIndexType.ExtrusionTopProfile => "extrusion edge",
+      ComponentIndexType.ExtrusionWallEdge => "extrusion edge",
+      ComponentIndexType.ExtrusionWallSurface => "extrusion face",
+      ComponentIndexType.ExtrusionCapSurface => "extrusion face",
+      ComponentIndexType.ExtrusionPath => "extrusion path",
+      ComponentIndexType.SubdVertex => "subd vertex",
+      ComponentIndexType.SubdEdge => "subd edge",
+      ComponentIndexType.SubdFace => "subd face",
+      ComponentIndexType.HatchLoop => "hatch loop",
+      ComponentIndexType.DimLinearPoint => "dimension point",
+      ComponentIndexType.DimRadialPoint => "dimension point",
+      ComponentIndexType.DimAngularPoint => "dimension point",
+      ComponentIndexType.DimOrdinatePoint => "dimension point",
+      ComponentIndexType.DimTextPoint => "dimension text point",
+      ComponentIndexType.DimCentermarkPoint => "centermark point",
+      ComponentIndexType.DimLeaderPoint => "leader point",
+      _ => null
+    };
+  }
+
+  private static string BrepOwnerTypeName(RhinoObject obj)
+  {
+    return obj.Geometry is Brep brep ? BrepTypeName(brep) : "surface";
+  }
+
+  private static string BrepTypeName(Brep brep)
+  {
+    return brep.Faces.Count <= 1 ? "surface" : "polysurface";
   }
 
   private static string CurveTypeName(Curve c)
@@ -1522,6 +1622,12 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   {
     if (count == 1)
       return value;
+    if (value.EndsWith(" vertex", StringComparison.OrdinalIgnoreCase))
+      return value[..^6] + "vertices";
+    if (value.Equals("vertex", StringComparison.OrdinalIgnoreCase))
+      return "vertices";
+    if (value.EndsWith("mesh", StringComparison.OrdinalIgnoreCase))
+      return value + "es";
     if (value.EndsWith("s", StringComparison.OrdinalIgnoreCase))
       return value;
     return value + "s";
@@ -1587,7 +1693,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
   private static string BuildObjectDropLabel(RhinoObject obj, RhinoDoc? doc)
   {
-    string type = TypeName(obj);
+    string type = BuildTypeText(new[] { obj });
     string name = obj.Attributes.Name;
     string info = ObjectExtraInfo(obj, doc);
     string label = string.IsNullOrWhiteSpace(name) ? type : $"{type} \"{name}\"";
@@ -2045,12 +2151,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     if (_doc == null || _allSelectedObjects.Count == 0)
       return;
 
-    // Ensure all tracked objects are selected in Rhino
-    _doc.Objects.UnselectAll();
-    foreach (var obj in _allSelectedObjects)
-      obj.Select(true);
-    _doc.Views.Redraw();
-
+    // MatchProperties consumes Rhino's current preselection as its target objects.
     RhinoApp.RunScript("_MatchProperties", false);
   }
 
@@ -5429,6 +5530,17 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       || obj.Geometry is SubD;
   }
 
+  private static bool SupportsRendering(RhinoObject obj)
+  {
+    return obj.IsPictureFrame
+      || obj.Geometry is Brep
+      || obj.Geometry is Extrusion
+      || obj.Geometry is Mesh
+      || obj.Geometry is SubD
+      || obj.Geometry is Surface
+      || obj.Geometry is InstanceReferenceGeometry;
+  }
+
   private static void WireSubmitOnEnter(TextBox textBox, Action apply)
   {
     textBox.KeyDown += (_, e) =>
@@ -5530,7 +5642,6 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private void UpdateTextSection(List<RhinoObject> objectList, RhinoDoc? doc)
   {
     bool isTextOnly = objectList.Count > 0 && objectList.All(o => o.Geometry is TextEntity);
-    _infoPlusSection.Visible = !isTextOnly;
     _textSection.Visible = isTextOnly;
     if (!isTextOnly) return;
 
