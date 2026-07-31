@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.Versioning;
+using System.Text;
 using System.Text.RegularExpressions;
 using Eto.Drawing;
 using Eto.Forms;
@@ -32,6 +33,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private const int RowHeight = 20;
   private const string DocUnitPrefsSection = "vObjectPropertiesPlus.InfoUnits";
   private const string GeneralSectionCollapsedKey = "Panel.GeneralSectionCollapsed";
+  private const string AttributesSectionCollapsedKey = "Panel.AttributesSectionCollapsed";
   private const string TextSectionCollapsedKey = "Panel.TextSectionCollapsed";
   private const string MeshSectionCollapsedKey = "Panel.MeshSectionCollapsed";
   private const string RenderingSectionCollapsedKey = "Panel.RenderingSectionCollapsed";
@@ -88,12 +90,14 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private readonly Panel _textAlignStylePanel;
   private readonly UITimer _textContentTimer = new UITimer { Interval = 0.4 };
   private readonly Control _infoPlusSection;
+  private readonly GroupBox _attributesSection;
   private readonly GroupBox _textSection;
   private readonly GroupBox _meshSection;
   private readonly GroupBox _renderingSection;
   private readonly GroupBox _isocurveSection;
 
   private bool _generalSectionCollapsed;
+  private bool _attributesSectionCollapsed;
   private bool _textSectionCollapsed;
   private bool _meshSectionCollapsed;
   private bool _renderingSectionCollapsed;
@@ -101,6 +105,19 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
   private readonly Button _matchButton;
   private readonly Button _detailsButton;
+  private readonly GridView _attributeGrid;
+  private readonly SearchBox _attributeSearch;
+  private readonly Button _attributeNewButton;
+  private readonly Button _attributeTextFieldButton;
+  private readonly Button _attributeDeleteButton;
+  private readonly Button _attributeImportButton;
+  private readonly Button _attributeExportButton;
+  private readonly Button _attributeMatchButton;
+  private readonly Button _attributeHelpButton;
+  private readonly Image _attributeMarkerIcon;
+  private readonly Image _attributePartialMarkerIcon;
+  private readonly List<AttributeUserTextRow> _attributeRows = new();
+  private bool _updatingAttributeGrid;
   private bool _refreshFromDocPending;
   private RhinoDoc? _pendingRefreshDoc;
 
@@ -134,6 +151,15 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     
     public static SelectionItem FromObject(RhinoObject obj) => new() { Object = obj };
     public static SelectionItem FromSegment(CurveInfo segment) => new() { Segment = segment };
+  }
+
+  private sealed class AttributeUserTextRow
+  {
+    public required string OriginalKey { get; init; }
+    public required string Key { get; set; }
+    public required string Value { get; set; }
+    public required string TypeIndicator { get; init; }
+    public required Image Marker { get; init; }
   }
 
   private readonly RectangleSideHighlightConduit _rectangleSideHighlightConduit = new();
@@ -223,6 +249,74 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _textItalicBtn = MakeToggleButton("I");
     _textUnderlineBtn = MakeToggleButton("U");
     _textContentArea = new TextArea { AcceptsReturn = true, Height = 70 };
+
+    _attributeMarkerIcon = CreateAttributeMarkerIcon(false);
+    _attributePartialMarkerIcon = CreateAttributeMarkerIcon(true);
+    _attributeGrid = new GridView
+    {
+      AllowEmptySelection = true,
+      AllowMultipleSelection = true,
+      Border = BorderType.None,
+      GridLines = GridLines.Both,
+      Height = 148,
+      RowHeight = RowHeight,
+      ShowHeader = true
+    };
+    _attributeGrid.Columns.Add(new GridColumn
+    {
+      DataCell = new ImageViewCell(nameof(AttributeUserTextRow.Marker)),
+      Editable = false,
+      HeaderText = string.Empty,
+      Resizable = false,
+      Width = 22
+    });
+    _attributeGrid.Columns.Add(new GridColumn
+    {
+      DataCell = new TextBoxCell(nameof(AttributeUserTextRow.Key)),
+      Editable = true,
+      Expand = true,
+      HeaderText = "Key",
+      MinWidth = 90
+    });
+    _attributeGrid.Columns.Add(new GridColumn
+    {
+      DataCell = new TextBoxCell(nameof(AttributeUserTextRow.Value)),
+      Editable = true,
+      Expand = true,
+      HeaderText = "Value",
+      MinWidth = 90
+    });
+    _attributeGrid.Columns.Add(new GridColumn
+    {
+      DataCell = new TextBoxCell(nameof(AttributeUserTextRow.TypeIndicator))
+      {
+        TextAlignment = TextAlignment.Center
+      },
+      Editable = false,
+      HeaderText = string.Empty,
+      Resizable = false,
+      Width = 24
+    });
+    _attributeSearch = new SearchBox { PlaceholderText = "Search" };
+    _attributeNewButton = NewAttributeToolbarButton("+", "New attribute");
+    _attributeTextFieldButton = NewAttributeToolbarButton("fx", "Edit text field", 28);
+    _attributeDeleteButton = NewAttributeToolbarButton("X", "Delete selected attributes");
+    _attributeImportButton = NewAttributeToolbarButton("<-", "Import attributes", 28);
+    _attributeExportButton = NewAttributeToolbarButton("->", "Export attributes", 28);
+    _attributeMatchButton = NewAttributeToolbarButton("=", "Match attributes from another object");
+    _attributeHelpButton = NewAttributeToolbarButton("?", "Open user text help");
+
+    _attributeNewButton.Click += (_, _) => AddAttribute();
+    _attributeTextFieldButton.Click += (_, _) => EditAttributeTextField();
+    _attributeDeleteButton.Click += (_, _) => DeleteSelectedAttributes();
+    _attributeImportButton.Click += (_, _) => ImportAttributes();
+    _attributeExportButton.Click += (_, _) => ExportAttributes();
+    _attributeMatchButton.Click += (_, _) => MatchAttributes();
+    _attributeHelpButton.Click += (_, _) => RhinoApp.RunScript("_Help _SetUserText", false);
+    _attributeSearch.TextChanged += (_, _) => ApplyAttributeFilter();
+    _attributeGrid.CellEdited += OnAttributeCellEdited;
+    _attributeGrid.SelectedItemsChanged += (_, _) => UpdateAttributeActionStates();
+    _attributeGrid.ContextMenu = CreateAttributeContextMenu();
 
     SetUnitDropOptions(_curveMetricUnitDrop);
     SetUnitDropOptions(_radiusUnitDrop);
@@ -438,9 +532,42 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       }
     };
 
+    var attributeToolbar = new StackLayout
+    {
+      Orientation = Orientation.Horizontal,
+      Spacing = 2,
+      Padding = new Eto.Drawing.Padding(8, 2, 6, 2),
+      Items =
+      {
+        new StackLayoutItem(_attributeNewButton, false),
+        new StackLayoutItem(_attributeTextFieldButton, false),
+        new StackLayoutItem(_attributeDeleteButton, false),
+        new StackLayoutItem(_attributeImportButton, false),
+        new StackLayoutItem(_attributeExportButton, false),
+        new StackLayoutItem(_attributeMatchButton, false),
+        new StackLayoutItem(_attributeHelpButton, false)
+      }
+    };
+
+    var attributesContent = new TableLayout
+    {
+      Spacing = new Eto.Drawing.Size(0, 2),
+      Padding = new Eto.Drawing.Padding(6, 0, 6, 4),
+      Rows =
+      {
+        new TableRow(new TableCell(attributeToolbar, true)),
+        new TableRow(new TableCell(_attributeSearch, true)),
+        new TableRow(new TableCell(_attributeGrid, true))
+      }
+    };
+
     var generalSection = CreateCollapsibleSection("General", generalTable,
       () => _generalSectionCollapsed,
       value => SetSectionCollapsed(GeneralSectionCollapsedKey, ref _generalSectionCollapsed, value));
+    _attributesSection = CreateCollapsibleSection("Attribute User Text", attributesContent,
+      () => _attributesSectionCollapsed,
+      value => SetSectionCollapsed(AttributesSectionCollapsedKey, ref _attributesSectionCollapsed, value));
+    _attributesSection.Visible = false;
     _textSection = CreateCollapsibleSection("Text", textSectionContent,
       () => _textSectionCollapsed,
       value => SetSectionCollapsed(TextSectionCollapsedKey, ref _textSectionCollapsed, value));
@@ -465,6 +592,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
         typeTable,
         _infoPlusSection,
         generalSection,
+        _attributesSection,
         _textSection,
         _meshSection,
         _renderingSection,
@@ -932,6 +1060,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       GetPropertyText(o.Attributes, "Url")
       ?? GetPropertyText(o.Attributes, "m_url")
       ?? string.Empty);
+    UpdateAttributeSection(objectList);
 
     var customMeshObjects = objectList.Where(SupportsCustomMesh).ToList();
     bool customMeshApplicable = customMeshObjects.Count > 0;
@@ -1358,6 +1487,10 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     DisableRectangleSideHighlight();
 
     _infoPlusSection.Visible = false;
+    _attributesSection.Visible = false;
+    _attributeRows.Clear();
+    _attributeGrid.DataStore = Array.Empty<AttributeUserTextRow>();
+    UpdateAttributeActionStates();
     _textSection.Visible = false;
     _meshSection.Visible = false;
     _renderingSection.Visible = false;
@@ -2159,6 +2292,641 @@ public sealed class vObjectPropertiesPlusPanel : Panel
           cluster[i] = fresh;
       }
     }
+  }
+
+  private void UpdateAttributeSection(IReadOnlyList<RhinoObject> objects)
+  {
+    _attributesSection.Visible = objects.Count > 0;
+    var selectedKeys = SelectedAttributeRows()
+      .Select(row => row.OriginalKey)
+      .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    var keys = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+    foreach (var obj in objects)
+    {
+      var strings = obj.Attributes.GetUserStrings();
+      foreach (string? key in strings.AllKeys)
+      {
+        if (IsVisibleAttributeKey(key))
+          keys.Add(key!);
+      }
+    }
+
+    _updatingAttributeGrid = true;
+    try
+    {
+      _attributeRows.Clear();
+      foreach (string key in keys)
+      {
+        var values = objects.Select(obj => obj.Attributes.GetUserString(key)).ToList();
+        bool allPresent = values.All(value => value != null);
+        bool allSame = allPresent && values.Skip(1)
+          .All(value => string.Equals(value, values[0], StringComparison.Ordinal));
+        _attributeRows.Add(new AttributeUserTextRow
+        {
+          OriginalKey = key,
+          Key = key,
+          Value = allSame ? values[0] ?? string.Empty : VariesText,
+          TypeIndicator = values.Any(IsTextFieldValue) ? "fx" : string.Empty,
+          Marker = allPresent ? _attributeMarkerIcon : _attributePartialMarkerIcon
+        });
+      }
+
+      ApplyAttributeFilter(selectedKeys);
+    }
+    finally
+    {
+      _updatingAttributeGrid = false;
+    }
+
+    UpdateAttributeActionStates();
+  }
+
+  private void ApplyAttributeFilter(IReadOnlySet<string>? selectedKeys = null)
+  {
+    if (_updatingAttributeGrid && selectedKeys == null)
+      return;
+
+    selectedKeys ??= SelectedAttributeRows()
+      .Select(row => row.OriginalKey)
+      .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    string query = (_attributeSearch.Text ?? string.Empty).Trim();
+    var visibleRows = _attributeRows
+      .Where(row => query.Length == 0
+        || row.Key.Contains(query, StringComparison.CurrentCultureIgnoreCase)
+        || row.Value.Contains(query, StringComparison.CurrentCultureIgnoreCase))
+      .ToList();
+
+    _attributeGrid.DataStore = visibleRows;
+    _attributeGrid.SelectedRows = visibleRows
+      .Select((row, index) => selectedKeys.Contains(row.OriginalKey) ? index : -1)
+      .Where(index => index >= 0)
+      .ToArray();
+    UpdateAttributeActionStates();
+  }
+
+  private List<AttributeUserTextRow> SelectedAttributeRows()
+  {
+    return _attributeGrid.SelectedItems
+      .OfType<AttributeUserTextRow>()
+      .ToList();
+  }
+
+  private void OnAttributeCellEdited(object? sender, GridViewCellEventArgs e)
+  {
+    if (_updatingAttributeGrid || e.Item is not AttributeUserTextRow row)
+      return;
+
+    if (e.Column == 1)
+    {
+      string newKey = (row.Key ?? string.Empty).Trim();
+      if (newKey.Length == 0)
+      {
+        Dialogs.ShowMessage("Attribute keys cannot be empty.", "Properties+");
+        RefreshFromCurrentSelection();
+        return;
+      }
+
+      bool collides = _attributeRows.Any(other => !ReferenceEquals(other, row)
+        && string.Equals(other.OriginalKey, newKey, StringComparison.OrdinalIgnoreCase));
+      if (collides)
+      {
+        Dialogs.ShowMessage($"An attribute named '{newKey}' already exists.", "Properties+");
+        RefreshFromCurrentSelection();
+        return;
+      }
+
+      if (!string.Equals(row.OriginalKey, newKey, StringComparison.Ordinal))
+      {
+        string oldKey = row.OriginalKey;
+        ApplyAttributes(attrs =>
+        {
+          string? value = attrs.GetUserString(oldKey);
+          if (value == null)
+            return;
+          attrs.DeleteUserString(oldKey);
+          attrs.SetUserString(newKey, value);
+        });
+      }
+      return;
+    }
+
+    if (e.Column == 2)
+    {
+      if (row.Value == VariesText)
+      {
+        RefreshFromCurrentSelection();
+        return;
+      }
+      SetAttributeValue(row.OriginalKey, row.Value ?? string.Empty);
+    }
+  }
+
+  private void AddAttribute()
+  {
+    if (_doc == null || !SelectedRhinoObjects().Any())
+      return;
+
+    string key = "Key";
+    int suffix = 2;
+    while (_attributeRows.Any(row => string.Equals(row.OriginalKey, key, StringComparison.OrdinalIgnoreCase)))
+      key = $"Key {suffix++}";
+
+    var values = Dialogs.ShowPropertyListBox(
+      "New Attribute",
+      "",
+      new List<KeyValuePair<string, string>>
+      {
+        new("Key", key),
+        new("Value", string.Empty)
+      });
+    if (values == null || values.Length < 2)
+      return;
+
+    key = (values[0] ?? string.Empty).Trim();
+    if (key.Length == 0)
+    {
+      Dialogs.ShowMessage("Attribute keys cannot be empty.", "Properties+");
+      return;
+    }
+    if (_attributeRows.Any(row => string.Equals(row.OriginalKey, key, StringComparison.OrdinalIgnoreCase)))
+    {
+      Dialogs.ShowMessage($"An attribute named '{key}' already exists.", "Properties+");
+      return;
+    }
+
+    SetAttributeValue(key, values[1] ?? string.Empty);
+  }
+
+  private void EditAttributeTextField()
+  {
+    var row = SelectedAttributeRows().SingleOrDefault();
+    if (row == null)
+      return;
+
+    string current = row.Value == VariesText ? string.Empty : row.Value;
+    if (TryShowRhinoAttributeTextFieldDialog(row, current, out bool accepted, out string formula))
+    {
+      if (accepted)
+        SetAttributeValue(row.OriginalKey, formula);
+      return;
+    }
+
+    if (Dialogs.ShowEditBox("Text Fields", "Attribute value", current, false, out string value))
+      SetAttributeValue(row.OriginalKey, value ?? string.Empty);
+  }
+
+  private bool TryShowRhinoAttributeTextFieldDialog(AttributeUserTextRow row, string current,
+    out bool accepted, out string formula)
+  {
+    accepted = false;
+    formula = current;
+    if (_doc == null)
+      return false;
+
+    object? dialog = null;
+    try
+    {
+      var assembly = Assembly.Load(new AssemblyName("Rhino.UI"));
+      Type? itemType = assembly.GetType("Rhino.UI.ObjectProperties.UserStringItem");
+      Type? viewModelType = assembly.GetType("Rhino.UI.ViewModels.TextFieldViewModel");
+      Type? panelType = assembly.GetType("Rhino.UI.Controls.TextFieldPanel");
+      if (itemType == null || viewModelType == null || panelType == null)
+        return false;
+
+      object? item = Activator.CreateInstance(itemType);
+      object? viewModel = Activator.CreateInstance(viewModelType, _doc, true);
+      object? panel = Activator.CreateInstance(panelType);
+      if (item == null || viewModel == null || panel == null)
+        return false;
+
+      var targets = SelectedRhinoObjects().ToList();
+      int keyCount = targets.Count(target => target.Attributes.GetUserString(row.OriginalKey) != null);
+      itemType.GetProperty("Key")?.SetValue(item, row.OriginalKey);
+      itemType.GetProperty("Value")?.SetValue(item, current);
+      itemType.GetProperty("Formula")?.SetValue(item, current);
+      itemType.GetProperty("Guid")?.SetValue(item, targets.FirstOrDefault()?.Id ?? Guid.Empty);
+      itemType.GetProperty("DocumentText")?.SetValue(item, false);
+      itemType.GetProperty("KeyCount")?.SetValue(item, keyCount);
+      itemType.GetProperty("AppliesToAll")?.SetValue(item, keyCount == targets.Count);
+      viewModelType.GetProperty("UserStringItem")?.SetValue(viewModel, item);
+
+      MethodInfo? createDialog = panelType.GetMethods(BindingFlags.Public | BindingFlags.Instance)
+        .FirstOrDefault(method => method.Name == "CreateDialog" && method.GetParameters().Length == 2);
+      dialog = createDialog?.Invoke(panel, new object?[] { viewModel, null });
+      if (dialog == null)
+        return false;
+
+      MethodInfo? showModal = dialog.GetType().GetMethods()
+        .FirstOrDefault(method => method.Name == "ShowModal"
+          && method.ReturnType == typeof(Result)
+          && method.GetParameters().Length == 1
+          && typeof(Control).IsAssignableFrom(method.GetParameters()[0].ParameterType));
+      if (showModal == null)
+        return false;
+
+      accepted = showModal.Invoke(dialog, new object[] { this }) is Result result
+        && result == Result.Success;
+      if (accepted)
+      {
+        formula = itemType.GetProperty("Formula")?.GetValue(item) as string
+          ?? itemType.GetProperty("Value")?.GetValue(item) as string
+          ?? current;
+      }
+      return true;
+    }
+    catch (Exception ex)
+    {
+      Log.Write($"TryShowRhinoAttributeTextFieldDialog failed: {ex}");
+      return false;
+    }
+    finally
+    {
+      (dialog as IDisposable)?.Dispose();
+    }
+  }
+
+  private void SetAttributeValue(string key, string value)
+  {
+    ApplyAttributes(attrs => attrs.SetUserString(key, value));
+  }
+
+  private void DeleteSelectedAttributes()
+  {
+    var keys = SelectedAttributeRows()
+      .Select(row => row.OriginalKey)
+      .Distinct(StringComparer.OrdinalIgnoreCase)
+      .ToList();
+    if (keys.Count == 0)
+      return;
+
+    ApplyAttributes(attrs =>
+    {
+      foreach (string key in keys)
+        attrs.DeleteUserString(key);
+    });
+  }
+
+  private void ImportAttributes()
+  {
+    if (_doc == null || !SelectedRhinoObjects().Any())
+      return;
+
+    var dialog = new Rhino.UI.OpenFileDialog
+    {
+      Title = "Import object attributes",
+      Filter = "User text files (*.csv;*.txt)|*.csv;*.txt|CSV files (*.csv)|*.csv|Text files (*.txt)|*.txt|All files (*.*)|*.*",
+      DefaultExt = "csv",
+      MultiSelect = false
+    };
+    if (!dialog.ShowOpenDialog() || string.IsNullOrWhiteSpace(dialog.FileName))
+      return;
+
+    try
+    {
+      var entries = ReadAttributeEntries(dialog.FileName);
+      if (entries.Count == 0)
+      {
+        Dialogs.ShowMessage("The selected file does not contain any attributes.", "Properties+");
+        return;
+      }
+
+      ApplyAttributes(attrs =>
+      {
+        foreach (var entry in entries)
+        {
+          if (!string.IsNullOrWhiteSpace(entry.Key))
+            attrs.SetUserString(entry.Key, entry.Value);
+        }
+      });
+    }
+    catch (Exception ex)
+    {
+      Log.Write($"ImportAttributes failed: {ex}");
+      Dialogs.ShowMessage("The attribute file could not be imported.", "Properties+");
+    }
+  }
+
+  private void ExportAttributes()
+  {
+    var rows = SelectedAttributeRows();
+    if (rows.Count == 0)
+      rows = _attributeRows.ToList();
+    if (rows.Count == 0)
+      return;
+    if (rows.Any(row => row.Value == VariesText))
+    {
+      Dialogs.ShowMessage("Varying attribute values cannot be exported. Select one object first.", "Properties+");
+      return;
+    }
+
+    var dialog = new Rhino.UI.SaveFileDialog
+    {
+      Title = "Export object attributes",
+      Filter = "CSV files (*.csv)|*.csv|Text files (*.txt)|*.txt",
+      DefaultExt = "csv",
+      FileName = "attributes.csv"
+    };
+    if (!dialog.ShowSaveDialog() || string.IsNullOrWhiteSpace(dialog.FileName))
+      return;
+
+    try
+    {
+      char delimiter = string.Equals(Path.GetExtension(dialog.FileName), ".txt", StringComparison.OrdinalIgnoreCase)
+        ? '\t'
+        : ',';
+      var lines = rows.Select(row =>
+        $"{EscapeDelimitedField(row.OriginalKey, delimiter)}{delimiter}{EscapeDelimitedField(row.Value, delimiter)}");
+      File.WriteAllLines(dialog.FileName, lines, new UTF8Encoding(true));
+    }
+    catch (Exception ex)
+    {
+      Log.Write($"ExportAttributes failed: {ex}");
+      Dialogs.ShowMessage("The attributes could not be exported.", "Properties+");
+    }
+  }
+
+  private static bool IsTextFieldValue(string? value)
+  {
+    return !string.IsNullOrEmpty(value)
+      && value.Contains("%<", StringComparison.Ordinal)
+      && value.Contains(">%", StringComparison.Ordinal);
+  }
+
+  private static bool IsVisibleAttributeKey(string? key)
+  {
+    return !string.IsNullOrEmpty(key) && !key.StartsWith(".", StringComparison.Ordinal);
+  }
+
+  private static Dictionary<string, string> ReadAttributeEntries(string path)
+  {
+    string text = File.ReadAllText(path);
+    char delimiter = string.Equals(Path.GetExtension(path), ".txt", StringComparison.OrdinalIgnoreCase)
+      ? '\t'
+      : ',';
+    if (delimiter == '\t' && !text.Contains('\t') && text.Contains(','))
+      delimiter = ',';
+
+    var records = ParseDelimitedRecords(text, delimiter);
+    if (records.Count > 0
+      && records[0].Count >= 2
+      && string.Equals(records[0][0], "Key", StringComparison.OrdinalIgnoreCase)
+      && string.Equals(records[0][1], "Value", StringComparison.OrdinalIgnoreCase))
+      records.RemoveAt(0);
+
+    var entries = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    foreach (var fields in records)
+    {
+      if (fields.Count < 2 || string.IsNullOrWhiteSpace(fields[0]))
+        continue;
+      entries[fields[0].Trim()] = fields[1];
+    }
+
+    if (entries.Count == 0 && delimiter == '\t')
+    {
+      foreach (string line in text.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n'))
+      {
+        int separator = line.IndexOf('=');
+        if (separator <= 0)
+          continue;
+        string key = line[..separator].Trim();
+        if (key.Length > 0)
+          entries[key] = line[(separator + 1)..];
+      }
+    }
+
+    return entries;
+  }
+
+  private static List<List<string>> ParseDelimitedRecords(string text, char delimiter)
+  {
+    var records = new List<List<string>>();
+    var fields = new List<string>();
+    var field = new StringBuilder();
+    bool quoted = false;
+
+    for (int i = 0; i < text.Length; i++)
+    {
+      char ch = text[i];
+      if (quoted)
+      {
+        if (ch == '"')
+        {
+          if (i + 1 < text.Length && text[i + 1] == '"')
+          {
+            field.Append('"');
+            i++;
+          }
+          else
+          {
+            quoted = false;
+          }
+        }
+        else
+        {
+          field.Append(ch);
+        }
+        continue;
+      }
+
+      if (ch == '"' && field.Length == 0)
+      {
+        quoted = true;
+      }
+      else if (ch == delimiter)
+      {
+        fields.Add(field.ToString());
+        field.Clear();
+      }
+      else if (ch == '\r' || ch == '\n')
+      {
+        if (ch == '\r' && i + 1 < text.Length && text[i + 1] == '\n')
+          i++;
+        fields.Add(field.ToString());
+        field.Clear();
+        if (fields.Any(value => value.Length > 0))
+          records.Add(fields);
+        fields = new List<string>();
+      }
+      else
+      {
+        field.Append(ch);
+      }
+    }
+
+    if (quoted)
+      throw new FormatException("The attribute file contains an unterminated quoted value.");
+    fields.Add(field.ToString());
+    if (fields.Any(value => value.Length > 0))
+      records.Add(fields);
+    return records;
+  }
+
+  private static string EscapeDelimitedField(string value, char delimiter)
+  {
+    if (value.IndexOfAny(new[] { delimiter, '"', '\r', '\n' }) < 0)
+      return value;
+    return $"\"{value.Replace("\"", "\"\"", StringComparison.Ordinal)}\"";
+  }
+
+  private void MatchAttributes()
+  {
+    if (_doc == null)
+      return;
+
+    var targets = SelectedRhinoObjects().ToList();
+    if (targets.Count == 0)
+      return;
+
+    RhinoObject? source = null;
+    using (var get = new Rhino.Input.Custom.GetObject())
+    {
+      get.SetCommandPrompt("Select source object for attributes");
+      get.GeometryFilter = ObjectType.AnyObject;
+      get.SubObjectSelect = false;
+      get.AlreadySelectedObjectSelect = false;
+      get.DeselectAllBeforePostSelect = false;
+      get.EnablePreSelect(false, false);
+      get.EnablePostSelect(true);
+      get.EnableClearObjectsOnEntry(false);
+      get.EnableUnselectObjectsOnExit(false);
+      if (get.Get() == GetResult.Object)
+        source = get.Object(0)?.Object();
+    }
+
+    source?.Select(false);
+    _doc.Views.Redraw();
+
+    if (source == null)
+      return;
+
+    var sourceEntries = source.Attributes.GetUserStrings();
+    ApplyAttributes(attrs =>
+    {
+      foreach (string? key in attrs.GetUserStrings().AllKeys)
+      {
+        if (IsVisibleAttributeKey(key))
+          attrs.DeleteUserString(key!);
+      }
+      foreach (string? key in sourceEntries.AllKeys)
+      {
+        if (IsVisibleAttributeKey(key))
+          attrs.SetUserString(key!, sourceEntries[key] ?? string.Empty);
+      }
+    });
+  }
+
+  private void SelectObjectsByAttribute(bool matchKey, bool matchValue)
+  {
+    if (_doc == null)
+      return;
+    var row = SelectedAttributeRows().SingleOrDefault();
+    if (row == null || (matchValue && row.Value == VariesText))
+      return;
+
+    _doc.Objects.UnselectAll();
+    foreach (var obj in _doc.Objects.GetObjectList(ObjectType.AnyObject))
+    {
+      var strings = obj.Attributes.GetUserStrings();
+      bool matches = matchKey && matchValue
+        ? string.Equals(obj.Attributes.GetUserString(row.OriginalKey), row.Value, StringComparison.Ordinal)
+        : matchKey
+          ? obj.Attributes.GetUserString(row.OriginalKey) != null
+          : strings.AllKeys.Any(key => key != null
+            && string.Equals(strings[key], row.Value, StringComparison.Ordinal));
+      if (matches)
+        obj.Select(true);
+    }
+    _doc.Views.Redraw();
+  }
+
+  private void CopySelectedAttributes()
+  {
+    var rows = SelectedAttributeRows();
+    if (rows.Count == 0)
+      return;
+    Clipboard.Instance.Text = string.Join(System.Environment.NewLine, rows.Select(row => $"{row.Key}\t{row.Value}"));
+  }
+
+  private ContextMenu CreateAttributeContextMenu()
+  {
+    var add = new ButtonMenuItem { Text = "New" };
+    var textFields = new ButtonMenuItem { Text = "Text Fields" };
+    var delete = new ButtonMenuItem { Text = "Delete" };
+    var import = new ButtonMenuItem { Text = "Import..." };
+    var export = new ButtonMenuItem { Text = "Export..." };
+    var match = new ButtonMenuItem { Text = "Match..." };
+    var selectAll = new ButtonMenuItem { Text = "Select All Key Values" };
+    var selectByKey = new ButtonMenuItem { Text = "Select objects by key" };
+    var selectByValue = new ButtonMenuItem { Text = "Select objects by value" };
+    var selectByKeyAndValue = new ButtonMenuItem { Text = "Select objects by key and value" };
+    var copy = new ButtonMenuItem { Text = "Copy key and value" };
+
+    add.Click += (_, _) => AddAttribute();
+    textFields.Click += (_, _) => EditAttributeTextField();
+    delete.Click += (_, _) => DeleteSelectedAttributes();
+    import.Click += (_, _) => ImportAttributes();
+    export.Click += (_, _) => ExportAttributes();
+    match.Click += (_, _) => MatchAttributes();
+    selectAll.Click += (_, _) => _attributeGrid.SelectAll();
+    selectByKey.Click += (_, _) => SelectObjectsByAttribute(true, false);
+    selectByValue.Click += (_, _) => SelectObjectsByAttribute(false, true);
+    selectByKeyAndValue.Click += (_, _) => SelectObjectsByAttribute(true, true);
+    copy.Click += (_, _) => CopySelectedAttributes();
+
+    var menu = new ContextMenu
+    {
+      Items =
+      {
+        add,
+        textFields,
+        delete,
+        import,
+        export,
+        match,
+        new SeparatorMenuItem(),
+        selectAll,
+        new SeparatorMenuItem(),
+        selectByKey,
+        selectByValue,
+        selectByKeyAndValue,
+        new SeparatorMenuItem(),
+        copy
+      }
+    };
+    menu.Opening += (_, _) =>
+    {
+      var selectedRows = SelectedAttributeRows();
+      int selectedCount = selectedRows.Count;
+      bool hasTargets = _doc != null && SelectedRhinoObjects().Any();
+      add.Enabled = hasTargets;
+      textFields.Enabled = selectedCount == 1;
+      delete.Enabled = selectedCount > 0;
+      import.Enabled = hasTargets;
+      export.Enabled = _attributeRows.Count > 0;
+      match.Enabled = hasTargets;
+      selectAll.Enabled = _attributeRows.Count > 0;
+      selectByKey.Enabled = selectedCount == 1;
+      selectByValue.Enabled = selectedCount == 1 && selectedRows[0].Value != VariesText;
+      selectByKeyAndValue.Enabled = selectByValue.Enabled;
+      copy.Enabled = selectedCount > 0;
+    };
+    return menu;
+  }
+
+  private void UpdateAttributeActionStates()
+  {
+    int selectedCount = SelectedAttributeRows().Count;
+    bool hasTargets = _doc != null && SelectedRhinoObjects().Any();
+    _attributeNewButton.Enabled = hasTargets;
+    _attributeTextFieldButton.Enabled = selectedCount == 1;
+    _attributeDeleteButton.Enabled = selectedCount > 0;
+    _attributeImportButton.Enabled = hasTargets;
+    _attributeExportButton.Enabled = _attributeRows.Count > 0;
+    _attributeMatchButton.Enabled = hasTargets;
+    _attributeHelpButton.Enabled = true;
+    _attributeSearch.Enabled = hasTargets;
+    _attributeGrid.Enabled = hasTargets;
   }
 
   private void RunMatchProperties()
@@ -5452,6 +6220,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     {
       var settings = vObjectPropertiesPlusPlugIn.Instance.Settings;
       _generalSectionCollapsed = settings.GetBool(GeneralSectionCollapsedKey, false);
+      _attributesSectionCollapsed = settings.GetBool(AttributesSectionCollapsedKey, false);
       _textSectionCollapsed = settings.GetBool(TextSectionCollapsedKey, false);
       _meshSectionCollapsed = settings.GetBool(MeshSectionCollapsedKey, false);
       _renderingSectionCollapsed = settings.GetBool(RenderingSectionCollapsedKey, false);
@@ -5514,6 +6283,28 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       Text = text,
       Width = 28
     };
+  }
+
+  private static Button NewAttributeToolbarButton(string text, string tooltip, int width = 24)
+  {
+    return new Button
+    {
+      Text = text,
+      ToolTip = tooltip,
+      Width = width,
+      Height = 22
+    };
+  }
+
+  private static Bitmap CreateAttributeMarkerIcon(bool partial)
+  {
+    var bitmap = new Bitmap(14, 14, PixelFormat.Format32bppRgba);
+    using var graphics = new Graphics(bitmap);
+    graphics.Clear(Colors.Transparent);
+    if (!partial)
+      graphics.FillEllipse(Color.FromArgb(255, 190, 35), 2, 2, 10, 10);
+    graphics.DrawEllipse(Color.FromArgb(184, 126, 0), 2, 2, 10, 10);
+    return bitmap;
   }
 
   private static TextBox NewSelectableLabelBox()
