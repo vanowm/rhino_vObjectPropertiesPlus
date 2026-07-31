@@ -930,23 +930,35 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       ?? GetPropertyText(o.Attributes, "m_url")
       ?? string.Empty);
 
-    SetCheckState(_customMeshCheck, CommonBoolOrVaries(objectList, o => HasCustomMesh(o.Attributes)));
-    SetCheckState(_castsShadowsCheck, CommonBoolOrVaries(objectList, o => ReadBool(o.Attributes, "CastsShadows") ?? false));
-    SetCheckState(_receivesShadowsCheck, CommonBoolOrVaries(objectList, o => ReadBool(o.Attributes, "ReceivesShadows") ?? false));
-
-    bool customMeshApplicable = objectList.All(o => SupportsCustomMesh(o));
+    var customMeshObjects = objectList.Where(SupportsCustomMesh).ToList();
+    bool customMeshApplicable = customMeshObjects.Count > 0;
+    SetCheckState(_customMeshCheck, customMeshApplicable
+      ? CommonBoolOrVaries(customMeshObjects, o => HasCustomMesh(o.Attributes))
+      : null);
     _customMeshCheck.Enabled = customMeshApplicable;
     _customMeshAdjustButton.Enabled = customMeshApplicable;
     _meshSection.Visible = customMeshApplicable;
 
-    bool renderingApplicable = objectList.All(SupportsRendering);
+    var renderingObjects = objectList.Where(SupportsRendering).ToList();
+    bool renderingApplicable = renderingObjects.Count > 0;
+    SetCheckState(_castsShadowsCheck, renderingApplicable
+      ? CommonBoolOrVaries(renderingObjects, o => ReadBool(o.Attributes, "CastsShadows") ?? false)
+      : null);
+    SetCheckState(_receivesShadowsCheck, renderingApplicable
+      ? CommonBoolOrVaries(renderingObjects, o => ReadBool(o.Attributes, "ReceivesShadows") ?? false)
+      : null);
     _castsShadowsCheck.Enabled = renderingApplicable;
     _receivesShadowsCheck.Enabled = renderingApplicable;
     _renderingSection.Visible = renderingApplicable;
 
-    bool isoApplicable = objectList.All(SupportsIsocurve);
-    string densityText = CommonOrVaries(objectList, o => WireDensityText(o.Attributes));
-    bool? showIso = isoApplicable ? CommonBoolOrVaries(objectList, o => ShowIsoFromDensity(o.Attributes)) : false;
+    var isocurveObjects = objectList.Where(SupportsIsocurve).ToList();
+    bool isoApplicable = isocurveObjects.Count > 0;
+    string densityText = isoApplicable
+      ? CommonOrVaries(isocurveObjects, o => WireDensityText(o.Attributes))
+      : "-";
+    bool? showIso = isoApplicable
+      ? CommonBoolOrVaries(isocurveObjects, o => ShowIsoFromDensity(o.Attributes))
+      : null;
     SetCheckState(_showIsocurveCheck, showIso);
     _showIsocurveCheck.Enabled = isoApplicable;
     _densityStepper.Enabled = isoApplicable && showIso == true;
@@ -2171,6 +2183,11 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
   private void ApplyAttributes(Action<ObjectAttributes> update)
   {
+    ApplyAttributes(_ => true, update);
+  }
+
+  private void ApplyAttributes(Func<RhinoObject, bool> appliesTo, Action<ObjectAttributes> update)
+  {
     if (_isUpdatingUi || _doc == null)
       return;
 
@@ -2181,6 +2198,9 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     {
       foreach (var obj in SelectedRhinoObjects())
       {
+        if (!appliesTo(obj))
+          continue;
+
         var attrs = obj.Attributes.Duplicate();
         update(attrs);
         changed |= _doc.Objects.ModifyAttributes(obj, attrs, true);
@@ -2864,7 +2884,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   {
     int value = (int)Math.Round(_densityStepper.Value);
 
-    ApplyAttributes(a => a.WireDensity = value);
+    ApplyAttributes(SupportsIsocurve, a => a.WireDensity = value);
   }
 
   private void ApplyCustomMesh()
@@ -2872,7 +2892,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     if (_customMeshCheck.Checked == null)
       return;
     bool on = _customMeshCheck.Checked.Value;
-    ApplyAttributes(a => a.CustomMeshingParameters = on ? MeshingParameters.Default : null);
+    ApplyAttributes(SupportsCustomMesh,
+      a => a.CustomMeshingParameters = on ? MeshingParameters.Default : null);
   }
 
   private void ApplyCastsShadows()
@@ -2880,7 +2901,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     if (_castsShadowsCheck.Checked == null)
       return;
     bool value = _castsShadowsCheck.Checked.Value;
-    ApplyAttributes(a => a.CastsShadows = value);
+    ApplyAttributes(SupportsRendering, a => a.CastsShadows = value);
   }
 
   private void ApplyReceivesShadows()
@@ -2888,7 +2909,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     if (_receivesShadowsCheck.Checked == null)
       return;
     bool value = _receivesShadowsCheck.Checked.Value;
-    ApplyAttributes(a => a.ReceivesShadows = value);
+    ApplyAttributes(SupportsRendering, a => a.ReceivesShadows = value);
   }
 
   private void ApplyShowIsocurve()
@@ -2897,7 +2918,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       return;
     bool show = _showIsocurveCheck.Checked.Value;
     _densityStepper.Enabled = show;
-    ApplyAttributes(a =>
+    ApplyAttributes(SupportsIsocurve, a =>
     {
       if (show)
       {
@@ -5641,9 +5662,9 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
   private void UpdateTextSection(List<RhinoObject> objectList, RhinoDoc? doc)
   {
-    bool isTextOnly = objectList.Count > 0 && objectList.All(o => o.Geometry is TextEntity);
-    _textSection.Visible = isTextOnly;
-    if (!isTextOnly) return;
+    bool hasText = objectList.Any(o => o.Geometry is TextEntity);
+    _textSection.Visible = hasText;
+    if (!hasText) return;
 
     bool prevUpdatingUi = _isUpdatingUi;
     _isUpdatingUi = true;
