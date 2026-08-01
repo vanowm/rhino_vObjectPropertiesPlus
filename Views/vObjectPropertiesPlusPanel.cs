@@ -1848,11 +1848,51 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     }
 
     System.Windows.Input.InputManager.Current.PreProcessInput += OnTypeDropPreProcessInput;
+    _nativeTypeDrop.ItemContainerGenerator.StatusChanged += OnTypeDropContainerStatusChanged;
+    _nativeTypeDrop.DropDownOpened += OnNativeTypeDropOpened;
     _typeDropInputTracking = true;
+  }
+
+  private void OnNativeTypeDropOpened(object? sender, EventArgs e)
+  {
+    _nativeTypeDrop?.Dispatcher.BeginInvoke(
+      System.Windows.Threading.DispatcherPriority.Loaded,
+      new Action(ConfigureTypeDropSeparatorItems));
+  }
+
+  private void OnTypeDropContainerStatusChanged(object? sender, EventArgs e)
+  {
+    if (_nativeTypeDrop?.ItemContainerGenerator.Status ==
+        System.Windows.Controls.Primitives.GeneratorStatus.ContainersGenerated)
+      ConfigureTypeDropSeparatorItems();
+  }
+
+  private void ConfigureTypeDropSeparatorItems()
+  {
+    if (_nativeTypeDrop == null)
+      return;
+
+    int itemCount = Math.Min(_nativeTypeDrop.Items.Count, _typeDropMap.Count);
+    for (int i = 0; i < itemCount; i++)
+    {
+      if (_nativeTypeDrop.ItemContainerGenerator.ContainerFromIndex(i) is not System.Windows.Controls.ComboBoxItem item)
+        continue;
+
+      bool separator = i > 0 && _typeDropMap[i] == null;
+      item.IsEnabled = !separator;
+      item.Focusable = !separator;
+      item.IsHitTestVisible = !separator;
+      item.IsTabStop = !separator;
+    }
   }
 
   private void DetachTypeDropHoverHandlers()
   {
+    if (_nativeTypeDrop != null)
+    {
+      _nativeTypeDrop.ItemContainerGenerator.StatusChanged -= OnTypeDropContainerStatusChanged;
+      _nativeTypeDrop.DropDownOpened -= OnNativeTypeDropOpened;
+    }
     if (_typeDropInputTracking)
     {
       System.Windows.Input.InputManager.Current.PreProcessInput -= OnTypeDropPreProcessInput;
@@ -5098,8 +5138,13 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
   private sealed class FocusHighlightConduit : DisplayConduit
   {
+    private static readonly System.Drawing.Color HighlightColor =
+      System.Drawing.Color.FromArgb(255, 235, 130, 20);
+
     private RhinoObject? _obj;
     private Curve? _segmentCurve;
+    private readonly Rhino.Display.DisplayMaterial _surfaceHighlightMaterial =
+      new(HighlightColor, 0.15);
 
     public void SetObject(RhinoObject obj) 
     {
@@ -5126,35 +5171,41 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       // If we have a specific segment curve, draw only that
       if (_segmentCurve != null)
       {
-        var color = System.Drawing.Color.FromArgb(255, 235, 130, 20);
-        e.Display.DrawCurve(_segmentCurve, color, 3);
+        e.Display.DrawCurve(_segmentCurve, HighlightColor, 3);
         return;
       }
       
       if (_obj?.Geometry == null)
         return;
 
-      var color2 = System.Drawing.Color.FromArgb(255, 235, 130, 20);
+      var color2 = HighlightColor;
       switch (_obj.Geometry)
       {
         case Curve crv:
           e.Display.DrawCurve(crv, color2, 3);
           break;
         case Rhino.Geometry.Brep brep:
-          e.Display.DrawBrepWires(brep, color2, 1);
+          e.Display.DrawBrepShaded(brep, _surfaceHighlightMaterial);
+          e.Display.DrawBrepWires(brep, color2, 2);
           break;
         case Rhino.Geometry.Extrusion ext:
           var extBrep = ext.ToBrep(true);
-          if (extBrep != null) e.Display.DrawBrepWires(extBrep, color2, 1);
+          if (extBrep != null)
+          {
+            e.Display.DrawBrepShaded(extBrep, _surfaceHighlightMaterial);
+            e.Display.DrawBrepWires(extBrep, color2, 2);
+          }
           break;
         case Rhino.Geometry.Mesh mesh:
+          e.Display.DrawMeshShaded(mesh, _surfaceHighlightMaterial);
           e.Display.DrawMeshWires(mesh, color2, 2);
           break;
         case TextDot dot:
           e.Display.DrawDot(dot, color2, System.Drawing.Color.Black, color2);
           break;
         case Rhino.Geometry.Point point:
-          e.Display.DrawPoint(point.Location, color2);
+          e.Display.DrawPoint(point.Location, Rhino.Display.PointStyle.SolidRound, 3, color2);
+          e.Display.DrawPoint(point.Location, Rhino.Display.PointStyle.Circle, 3, color2);
           break;
         case TextEntity text:
           e.Display.DrawText(text, color2);
