@@ -107,6 +107,9 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private readonly Panel _nativeTextPanelHost;
   private readonly Control? _nativeTextPanel;
   private object? _nativeTextViewModel;
+  private readonly Panel _nativeDimensionLeaderPanelHost;
+  private readonly Dictionary<string, Control> _nativeDimensionLeaderPanels = new();
+  private object? _nativeDimensionLeaderViewModel;
   private bool _refreshFromDocPending;
   private RhinoDoc? _pendingRefreshDoc;
 
@@ -244,6 +247,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _nativeTextPanelHost = new Panel { Visible = false };
     if (_nativeTextPanel != null)
       _nativeTextPanelHost.Content = _nativeTextPanel;
+    _nativeDimensionLeaderPanelHost = new Panel { Visible = false };
 
     SetUnitDropOptions(_curveMetricUnitDrop);
     SetUnitDropOptions(_radiusUnitDrop);
@@ -492,6 +496,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
         generalSection,
         _textSection,
         _nativeTextPanelHost,
+        _nativeDimensionLeaderPanelHost,
         _attributesSection,
         _meshSection,
         _renderingSection,
@@ -540,6 +545,10 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     {
       DetachTypeDropHoverHandlers();
       ClearTypeDropHoverPreview();
+      (_nativeTextViewModel as IDisposable)?.Dispose();
+      (_nativeDimensionLeaderViewModel as IDisposable)?.Dispose();
+      _nativeTextViewModel = null;
+      _nativeDimensionLeaderViewModel = null;
     };
     RhinoDoc.SelectObjects      += (_, e) => { Log.Write("Event: SelectObjects"); RefreshFromDoc(e.Document); };
     RhinoDoc.DeselectObjects    += (_, e) => { Log.Write("Event: DeselectObjects"); RefreshFromDoc(e.Document); };
@@ -1334,6 +1343,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _attributesSection.Visible = false;
     _attributePanel.SelectedObjects = Array.Empty<RhinoObject>();
     _nativeTextPanelHost.Visible = false;
+    _nativeDimensionLeaderPanelHost.Visible = false;
     _textSection.Visible = false;
     _meshSection.Visible = false;
     _renderingSection.Visible = false;
@@ -6009,6 +6019,144 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     }
   }
 
+  private static (string Key, string PanelTypeName, string ViewModelTypeName,
+    Type ArrayElementType, object[] PanelArguments)? NativeDimensionLeaderPanelSpec(
+      IReadOnlyList<RhinoObject> objects)
+  {
+    if (objects.Count == 0)
+      return null;
+
+    bool useV9 = RhinoApp.Version.Major >= 9;
+    if (objects.All(obj => obj is LinearDimensionObject))
+      return (useV9 ? "LinearDimensionV9" : "LinearDimension",
+        useV9 ? "Rhino.UI.Controls.LinearDimensionV9Panel" : "Rhino.UI.Controls.LinearDimensionPanel",
+        useV9 ? "Rhino.UI.ViewModels.LinearDimensionV9ViewModel" : "Rhino.UI.ViewModels.LinearDimensionViewModel",
+        typeof(LinearDimensionObject), new object[] { true });
+    if (objects.All(obj => obj is AngularDimensionObject))
+      return (useV9 ? "AngularDimensionV9" : "AngularDimension",
+        useV9 ? "Rhino.UI.Controls.AngularDimensionV9Panel" : "Rhino.UI.Controls.AngularDimensionPanel",
+        useV9 ? "Rhino.UI.ViewModels.AngularDimensionV9ViewModel" : "Rhino.UI.ViewModels.AngularDimensionViewModel",
+        typeof(AngularDimensionObject), new object[] { true });
+    if (objects.All(obj => obj is RadialDimensionObject))
+      return (useV9 ? "RadialDimensionV9" : "RadialDimension",
+        useV9 ? "Rhino.UI.Controls.RadialDimensionV9Panel" : "Rhino.UI.Controls.RadialDimensionPanel",
+        useV9 ? "Rhino.UI.ViewModels.RadialDimensionV9ViewModel" : "Rhino.UI.ViewModels.RadialDimensionViewModel",
+        typeof(RadialDimensionObject), new object[] { true });
+    if (objects.All(obj => obj is OrdinateDimensionObject))
+      return (useV9 ? "OrdinateDimensionV9" : "OrdinateDimension",
+        useV9 ? "Rhino.UI.Controls.OrdinateDimensionV9Panel" : "Rhino.UI.Controls.OrdinateDimensionPanel",
+        useV9 ? "Rhino.UI.ViewModels.OrdinateDimensionV9ViewModel" : "Rhino.UI.ViewModels.OrdinateDimensionViewModel",
+        typeof(OrdinateDimensionObject), new object[] { true });
+    if (objects.All(obj => obj is CentermarkObject))
+      return ("CentermarkDimension",
+        "Rhino.UI.Controls.CentermarkDimensionPanel",
+        "Rhino.UI.ViewModels.CentermarkDimensionViewModel",
+        typeof(CentermarkObject), new object[] { true });
+    if (objects.All(obj => obj is LeaderObject))
+      return (useV9 ? "LeaderV9" : "Leader",
+        useV9 ? "Rhino.UI.Controls.LeaderV9Panel" : "Rhino.UI.Controls.RLeaderPanel",
+        useV9 ? "Rhino.UI.ViewModels.LeaderV9ViewModel" : "Rhino.UI.ViewModels.RLeaderViewModel",
+        typeof(AnnotationObjectBase), new object[] { false, true });
+
+    return null;
+  }
+
+  private static Control? CreateNativeDimensionLeaderPanel(
+    Assembly assembly, string panelTypeName, object[] panelArguments)
+  {
+    Type? panelType = assembly.GetType(panelTypeName);
+    var panel = panelType == null
+      ? null
+      : Activator.CreateInstance(panelType, panelArguments) as Control;
+    if (panel == null)
+      return null;
+
+    foreach (string methodName in new[]
+    {
+      "EnableAnnotationStyleUI",
+      "EnableMaskUI",
+      "EnableModelSpaceScaleUI",
+      "EnableTextFieldUI",
+      "EnableUnderlineUI"
+    })
+    {
+      panelType!.GetMethod(methodName, BindingFlags.Public | BindingFlags.Instance)
+        ?.Invoke(panel, new object[] { true });
+    }
+
+    return panel;
+  }
+
+  private bool TryUpdateNativeDimensionLeaderPanel(
+    IReadOnlyList<RhinoObject> objects, RhinoDoc? doc)
+  {
+    if (doc == null)
+      return false;
+
+    var spec = NativeDimensionLeaderPanelSpec(objects);
+    if (spec == null)
+      return false;
+
+    try
+    {
+      var assembly = Assembly.Load(new AssemblyName("Rhino.UI"));
+      if (!_nativeDimensionLeaderPanels.TryGetValue(spec.Value.Key, out Control? panel))
+      {
+        panel = CreateNativeDimensionLeaderPanel(
+          assembly, spec.Value.PanelTypeName, spec.Value.PanelArguments);
+        if (panel == null)
+          return false;
+        _nativeDimensionLeaderPanels.Add(spec.Value.Key, panel);
+      }
+
+      Type? viewModelType = assembly.GetType(spec.Value.ViewModelTypeName);
+      Type? cepType = assembly.GetType("Rhino.UI.ViewModels.Cep");
+      if (viewModelType == null || cepType == null)
+        return false;
+
+      Array annotationObjects = Array.CreateInstance(spec.Value.ArrayElementType, objects.Count);
+      for (int i = 0; i < objects.Count; i++)
+        annotationObjects.SetValue(objects[i], i);
+
+      object propertiesMode = Enum.Parse(cepType, "Properties");
+      ConstructorInfo? constructor = viewModelType
+        .GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+        .FirstOrDefault(candidate =>
+        {
+          var parameters = candidate.GetParameters();
+          return parameters.Length == 4
+            && parameters[0].ParameterType == typeof(uint)
+            && parameters[1].ParameterType == typeof(RhinoDoc)
+            && parameters[2].ParameterType == annotationObjects.GetType()
+            && parameters[3].ParameterType == cepType;
+        });
+      object? viewModel = constructor?.Invoke(new object[] { 0u, doc, annotationObjects, propertiesMode });
+      if (viewModel == null)
+        return false;
+
+      MethodInfo? setDataContext = panel.GetType()
+        .GetMethods(BindingFlags.Public | BindingFlags.Instance)
+        .FirstOrDefault(method => method.Name == "SetDataContext"
+          && method.GetParameters().Length == 1
+          && method.GetParameters()[0].ParameterType.IsInstanceOfType(viewModel));
+      if (setDataContext != null)
+        setDataContext.Invoke(panel, new[] { viewModel });
+      else
+        panel.DataContext = viewModel;
+
+      (_nativeDimensionLeaderViewModel as IDisposable)?.Dispose();
+      _nativeDimensionLeaderViewModel = viewModel;
+      if (!ReferenceEquals(_nativeDimensionLeaderPanelHost.Content, panel))
+        _nativeDimensionLeaderPanelHost.Content = panel;
+      return true;
+    }
+    catch (Exception ex)
+    {
+      Log.Write($"TryUpdateNativeDimensionLeaderPanel failed: {ex}");
+      return false;
+    }
+  }
+
   private bool TryUpdateNativeTextObjectPanel(IReadOnlyList<RhinoObject> objects, RhinoDoc? doc)
   {
     if (_nativeTextPanel == null || doc == null)
@@ -6072,9 +6220,18 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       .ToList();
     bool hasText = textGeometries.Count > 0;
     bool useNativeTextPanel = hasText && TryUpdateNativeTextObjectPanel(objectList, doc);
+    bool useNativeDimensionLeaderPanel = hasText
+      && !useNativeTextPanel
+      && TryUpdateNativeDimensionLeaderPanel(objectList, doc);
     _nativeTextPanelHost.Visible = useNativeTextPanel;
-    _textSection.Visible = hasText && !useNativeTextPanel;
-    if (!hasText || useNativeTextPanel) return;
+    _nativeDimensionLeaderPanelHost.Visible = useNativeDimensionLeaderPanel;
+    if (!useNativeDimensionLeaderPanel && _nativeDimensionLeaderViewModel != null)
+    {
+      (_nativeDimensionLeaderViewModel as IDisposable)?.Dispose();
+      _nativeDimensionLeaderViewModel = null;
+    }
+    _textSection.Visible = hasText && !useNativeTextPanel && !useNativeDimensionLeaderPanel;
+    if (!hasText || useNativeTextPanel || useNativeDimensionLeaderPanel) return;
 
     bool prevUpdatingUi = _isUpdatingUi;
     _isUpdatingUi = true;
