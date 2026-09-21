@@ -1,4 +1,4 @@
-# vObjectProperties+  ·  v26.8.28.1449
+# vObjectProperties+  ·  v26.9.21.1113
 
 vObjectProperties+ is a Rhino 8 and Rhino 9 plug-in that adds a per-document **Properties+** panel for inspecting and editing object geometry, attributes, annotation, rendering, and display settings.
 
@@ -8,6 +8,7 @@ vObjectProperties+ is a Rhino 8 and Rhino 9 plug-in that adds a per-document **P
 - Edits common attributes across single or multiple selections, with mixed values shown as varying.
 - Provides Name, Layer, Display Color, Display Mode, Linetype, Linetype Scale, Print Color, Print Width, Section Style, and Hyperlink controls.
 - Adds text font, height, alignment, style, and content controls for annotation objects.
+- Edits picture image, brightness, contrast, saturation, sharpness, transparency, alpha, and color-mask settings from either the selected-object properties or a document-wide Pictures panel, with factor and two-point calibrated scaling that can include contained objects.
 - Exposes custom render-mesh settings, shadow controls, and surface isocurve density.
 - Includes Match and Details actions and stores unit-display preferences per document.
 - Wraps object edits in Rhino undo records.
@@ -18,7 +19,7 @@ vObjectProperties+ is a Rhino 8 and Rhino 9 plug-in that adds a per-document **P
 | --- | --- |
 | `vObjectPropertiesPlus` | Toggle the per-document **Properties+** panel. |
 
-The panel is also available from Rhino's Panels menu and from the **Properties+** page in Object Properties.
+The **Properties+** and document-wide **Pictures** panels are available from Rhino's Panels menu. **Properties+** also appears as a page in Object Properties.
 
 ## Requirements
 

@@ -33,6 +33,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private const string GeneralSectionCollapsedKey = "Panel.GeneralSectionCollapsed";
   private const string AttributesSectionCollapsedKey = "Panel.AttributesSectionCollapsed";
   private const string TextSectionCollapsedKey = "Panel.TextSectionCollapsed";
+  private const string PictureSectionCollapsedKey = "Panel.PictureSectionCollapsed";
   private const string MeshSectionCollapsedKey = "Panel.MeshSectionCollapsed";
   private const string RenderingSectionCollapsedKey = "Panel.RenderingSectionCollapsed";
   private const string IsocurveSectionCollapsedKey = "Panel.IsocurveSectionCollapsed";
@@ -58,6 +59,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private readonly CheckBox _receivesShadowsCheck;
   private readonly NumericStepper _densityStepper;
   private readonly CheckBox _showIsocurveCheck;
+
+  private readonly PictureEditorControl _pictureEditor;
 
   private readonly TextBox _totalLengthBox;
   private readonly Label _totalLengthNameLabel;
@@ -90,6 +93,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private readonly Control _infoPlusSection;
   private readonly GroupBox _attributesSection;
   private readonly GroupBox _textSection;
+  private readonly GroupBox _pictureSection;
   private readonly GroupBox _meshSection;
   private readonly GroupBox _renderingSection;
   private readonly GroupBox _isocurveSection;
@@ -97,6 +101,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private bool _generalSectionCollapsed;
   private bool _attributesSectionCollapsed;
   private bool _textSectionCollapsed;
+  private bool _pictureSectionCollapsed;
   private bool _meshSectionCollapsed;
   private bool _renderingSectionCollapsed;
   private bool _isocurveSectionCollapsed;
@@ -197,6 +202,10 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _receivesShadowsCheck = NewCheckBox();
     _densityStepper = NewNumericStepper(-1, 999, 1, 0);
     _showIsocurveCheck = NewCheckBox();
+
+    _pictureEditor = new PictureEditorControl(
+      () => _doc,
+      () => SelectedRhinoObjects().ToList());
 
     SetButtonIcon(_displayColorButton, "Layer");
     SetButtonIcon(_printColorButton, "Display_Display_Panel");
@@ -327,7 +336,6 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _castsShadowsCheck.CheckedChanged += (_, _) => ApplyCastsShadows();
     _receivesShadowsCheck.CheckedChanged += (_, _) => ApplyReceivesShadows();
     _showIsocurveCheck.CheckedChanged += (_, _) => ApplyShowIsocurve();
-
     _matchButton = new Button { Text = "Match" };
     _matchButton.Click += (_, _) => RunMatchProperties();
 
@@ -474,6 +482,10 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       () => _textSectionCollapsed,
       value => SetSectionCollapsed(TextSectionCollapsedKey, ref _textSectionCollapsed, value));
     _textSection.Visible = false;
+    _pictureSection = CreateCollapsibleSection("Picture", _pictureEditor,
+      () => _pictureSectionCollapsed,
+      value => SetSectionCollapsed(PictureSectionCollapsedKey, ref _pictureSectionCollapsed, value));
+    _pictureSection.Visible = false;
     _meshSection = CreateCollapsibleSection("Render Mesh Settings", meshTable,
       () => _meshSectionCollapsed,
       value => SetSectionCollapsed(MeshSectionCollapsedKey, ref _meshSectionCollapsed, value));
@@ -494,6 +506,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
         typeTable,
         _infoPlusSection,
         generalSection,
+        _pictureSection,
         _textSection,
         _nativeTextPanelHost,
         _nativeDimensionLeaderPanelHost,
@@ -549,6 +562,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       (_nativeDimensionLeaderViewModel as IDisposable)?.Dispose();
       _nativeTextViewModel = null;
       _nativeDimensionLeaderViewModel = null;
+      _pictureEditor.Stop();
     };
     RhinoDoc.SelectObjects      += (_, e) => { Log.Write("Event: SelectObjects"); RefreshFromDoc(e.Document); };
     RhinoDoc.DeselectObjects    += (_, e) => { Log.Write("Event: DeselectObjects"); RefreshFromDoc(e.Document); };
@@ -611,6 +625,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
   private void OnObjectAttributesModified(RhinoDoc doc, RhinoObject? changedObject)
   {
+    if (_pictureEditor.IsApplying)
+      return;
     if (ShouldRefreshForAttributeChange(changedObject))
     {
       Log.Write("Event: ModifyObjectAttributes");
@@ -964,6 +980,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       ?? GetPropertyText(o.Attributes, "m_url")
       ?? string.Empty);
     UpdateAttributeSection(objectList);
+    UpdatePictureSection(objectList);
 
     var customMeshObjects = objectList.Where(SupportsCustomMesh).ToList();
     bool customMeshApplicable = customMeshObjects.Count > 0;
@@ -1313,6 +1330,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     SetCheckState(_showIsocurveCheck, null);
     SetControlEnabled(_showIsocurveCheck, false);
 
+    _pictureEditor.Update(_doc, Array.Empty<RhinoObject>());
+
     _totalLengthBox.Text = "-";
     Log.Write("SetEmptyState: Set _totalLengthBox.Text=-");
     SetControlEnabled(_totalLengthBox, false);
@@ -1345,6 +1364,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _nativeTextPanelHost.Visible = false;
     _nativeDimensionLeaderPanelHost.Visible = false;
     _textSection.Visible = false;
+    _pictureSection.Visible = false;
     _meshSection.Visible = false;
     _renderingSection.Visible = false;
     _isocurveSection.Visible = false;
@@ -1474,6 +1494,9 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
   private static string TypeName(RhinoObject obj)
   {
+    if (obj.IsPictureFrame)
+      return "picture surface";
+
     if (obj.ObjectType == ObjectType.Curve)
       return obj.Geometry is Curve c ? CurveTypeName(c) : "curve";
 
@@ -1542,6 +1565,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
   private static string BrepOwnerTypeName(RhinoObject obj)
   {
+    if (obj.IsPictureFrame)
+      return "picture surface";
     return obj.Geometry is Brep brep ? BrepTypeName(brep) : "surface";
   }
 
@@ -2361,6 +2386,16 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _attributePanel.SelectedObjects = selectedObjects;
     _attributePanel.InitializeControls(selectedObjects);
   }
+
+  private void UpdatePictureSection(IReadOnlyList<RhinoObject> objects)
+  {
+    var pictureObjects = objects
+      .Where(obj => obj.IsPictureFrame && obj.RenderMaterial != null)
+      .ToList();
+    _pictureSection.Visible = pictureObjects.Count > 0;
+    _pictureEditor.Update(_doc, pictureObjects);
+  }
+
   private void RunMatchProperties()
   {
     if (_doc == null || _allSelectedObjects.Count == 0)
@@ -5735,6 +5770,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       _generalSectionCollapsed = settings.GetBool(GeneralSectionCollapsedKey, false);
       _attributesSectionCollapsed = settings.GetBool(AttributesSectionCollapsedKey, false);
       _textSectionCollapsed = settings.GetBool(TextSectionCollapsedKey, false);
+      _pictureSectionCollapsed = settings.GetBool(PictureSectionCollapsedKey, false);
       _meshSectionCollapsed = settings.GetBool(MeshSectionCollapsedKey, false);
       _renderingSectionCollapsed = settings.GetBool(RenderingSectionCollapsedKey, false);
       _isocurveSectionCollapsed = settings.GetBool(IsocurveSectionCollapsedKey, false);
@@ -5821,19 +5857,21 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
   private static bool SupportsCustomMesh(RhinoObject obj)
   {
-    return obj.Geometry is Brep
+    return !obj.IsPictureFrame
+      && (obj.Geometry is Brep
       || obj.Geometry is Extrusion
       || obj.Geometry is Mesh
       || obj.Geometry is SubD
-      || obj.Geometry is Surface;
+      || obj.Geometry is Surface);
   }
 
   private static bool SupportsIsocurve(RhinoObject obj)
   {
-    return obj.Geometry is Brep
+    return !obj.IsPictureFrame
+      && (obj.Geometry is Brep
       || obj.Geometry is Extrusion
       || obj.Geometry is Surface
-      || obj.Geometry is SubD;
+      || obj.Geometry is SubD);
   }
 
   private static bool SupportsRendering(RhinoObject obj)

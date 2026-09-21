@@ -50,6 +50,16 @@ public class vObjectPropertiesPlusPlugIn : PlugIn
       Log.Write($"OnLoad: RegisterPanel FAILED: {ex}");
     }
 
+    try
+    {
+      Panels.RegisterPanel(this, typeof(Views.vPicturesPanel), "Pictures", LoadPanelIcon(), PanelType.PerDoc);
+      Log.Write("OnLoad: Pictures panel registration succeeded with PanelType.PerDoc");
+    }
+    catch (Exception ex)
+    {
+      Log.Write($"OnLoad: Pictures panel registration FAILED: {ex}");
+    }
+
     return LoadReturnCode.Success;
   }
 
