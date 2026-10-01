@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
 using System.Reflection;
@@ -21,7 +22,8 @@ namespace vObjectPropertiesPlus.Views;
 [System.Runtime.InteropServices.Guid("B827CFBD-288D-473A-B31F-E0D36D57F982")]
 public sealed class vObjectPropertiesPlusPanel : Panel
 {
-  private const int LabelWidth = 122;
+  private const int LayerIndentSpaces = 4; // Spaces per nested layer level in the dropdown and context menu; non-negative integer.
+  private const int LabelWidth = 92;
   private const int ValueWidth = 102;
   private const int NumericValueWidth = 84;
   private const int InfoNumericValueWidth = 64;
@@ -37,6 +39,9 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private const string MeshSectionCollapsedKey = "Panel.MeshSectionCollapsed";
   private const string RenderingSectionCollapsedKey = "Panel.RenderingSectionCollapsed";
   private const string IsocurveSectionCollapsedKey = "Panel.IsocurveSectionCollapsed";
+  private const string AttributeEditorHeightKey = "Panel.AttributeEditorHeight";
+  private const string TextEditorHeightKey = "Panel.TextEditorHeight";
+  private const string NativeTextEditorHeightKey = "Panel.NativeTextEditorHeight";
 
   private readonly DropDown _typeDrop;
   private readonly TextBox _nameBox;
@@ -89,14 +94,15 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private readonly DropDown _textHeightUnitDrop;
   private readonly TextArea _textContentArea;
   private readonly Panel _textAlignStylePanel;
+  private readonly Panel _nativeTextPanelHost;
   private readonly UITimer _textContentTimer = new UITimer { Interval = 0.4 };
   private readonly Control _infoPlusSection;
-  private readonly GroupBox _attributesSection;
-  private readonly GroupBox _textSection;
-  private readonly GroupBox _pictureSection;
-  private readonly GroupBox _meshSection;
-  private readonly GroupBox _renderingSection;
-  private readonly GroupBox _isocurveSection;
+  private readonly Panel _attributesSection;
+  private readonly Panel _textSection;
+  private readonly Panel _pictureSection;
+  private readonly Panel _meshSection;
+  private readonly Panel _renderingSection;
+  private readonly Panel _isocurveSection;
 
   private bool _generalSectionCollapsed;
   private bool _attributesSectionCollapsed;
@@ -109,18 +115,28 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private readonly Button _matchButton;
   private readonly Button _detailsButton;
   private readonly Rhino.UI.ObjectProperties.UserStringsPanelControl _attributePanel;
-  private readonly Panel _nativeTextPanelHost;
   private readonly Control? _nativeTextPanel;
   private object? _nativeTextViewModel;
   private readonly Panel _nativeDimensionLeaderPanelHost;
+  private readonly Panel _nativeDimensionLeaderPanelContent;
   private readonly Dictionary<string, Control> _nativeDimensionLeaderPanels = new();
   private object? _nativeDimensionLeaderViewModel;
+  private bool _panelLoaded;
   private bool _refreshFromDocPending;
   private RhinoDoc? _pendingRefreshDoc;
+  private RhinoDoc? _deferredCommandRefreshDoc;
 
   private readonly Dictionary<string, Image?> _uiIconCache = new(StringComparer.OrdinalIgnoreCase);
   private readonly Dictionary<Guid, bool> _layerExpandedState = new();
   private string _currentLayerFullPath = "-";
+  private List<LayerDropItem> _layerDropItems = new();
+  private LayerDropItem? _layerDropStatusItem;
+  private uint _layerDropDocSerial;
+  private Guid _layerDropViewportId;
+  private bool _layerDropItemsDirty = true;
+  private System.Windows.Controls.ComboBox? _nativeLayerDrop;
+  private Stopwatch? _layerDropOpenTimer;
+  private bool _layerDropFirstOpen = true;
 
   private enum RectangleHighlightKind
   {
@@ -246,17 +262,27 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _textBoldBtn = MakeToggleButton("B");
     _textItalicBtn = MakeToggleButton("I");
     _textUnderlineBtn = MakeToggleButton("U");
-    _textContentArea = new TextArea { AcceptsReturn = true, Height = 70 };
+    _textContentArea = new TextArea
+    {
+      AcceptsReturn = true,
+      Height = LoadPersistedEditorHeight(TextEditorHeightKey, 70, 50)
+    };
 
     _attributePanel = new Rhino.UI.ObjectProperties.UserStringsPanelControl
     {
-      EnableEventWatchers = false
+      EnableEventWatchers = false,
+      Height = LoadPersistedEditorHeight(AttributeEditorHeightKey, 150, 70)
     };
     _nativeTextPanel = CreateNativeTextObjectPanel();
     _nativeTextPanelHost = new Panel { Visible = false };
     if (_nativeTextPanel != null)
-      _nativeTextPanelHost.Content = _nativeTextPanel;
+      _nativeTextPanelHost.Content = NewUnframedSection(_nativeTextPanel,
+        () => GetNativeAnnotationEditor(_nativeTextPanel), NativeTextEditorHeightKey);
     _nativeDimensionLeaderPanelHost = new Panel { Visible = false };
+    _nativeDimensionLeaderPanelContent = new Panel();
+    _nativeDimensionLeaderPanelHost.Content = NewUnframedSection(_nativeDimensionLeaderPanelContent,
+      () => GetNativeAnnotationEditor(_nativeDimensionLeaderPanelContent.Content),
+      "Panel.DimensionLeaderEditorHeight");
 
     SetUnitDropOptions(_curveMetricUnitDrop);
     SetUnitDropOptions(_radiusUnitDrop);
@@ -440,59 +466,82 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       Padding = new Eto.Drawing.Padding(10, 1, 6, 1),
       Content = new StackLayout
       {
-        Orientation = Orientation.Horizontal,
         Spacing = 2,
         Items =
         {
-          new StackLayoutItem(_textAlignLeftBtn, false),
-          new StackLayoutItem(_textAlignCenterBtn, false),
-          new StackLayoutItem(_textAlignRightBtn, false),
-          new StackLayoutItem(_textAlignAutoBtn, false),
-          new StackLayoutItem(new Panel { Width = 6 }, false),
-          new StackLayoutItem(_textVAlignTopBtn, false),
-          new StackLayoutItem(_textVAlignMiddleBtn, false),
-          new StackLayoutItem(_textVAlignBottomBtn, false),
-          new StackLayoutItem(new Panel { Width = 12 }, false),
-          new StackLayoutItem(_textBoldBtn, false),
-          new StackLayoutItem(_textItalicBtn, false),
-          new StackLayoutItem(_textUnderlineBtn, false),
+          new StackLayout
+          {
+            Orientation = Orientation.Horizontal,
+            Spacing = 2,
+            Items =
+            {
+              _textAlignLeftBtn,
+              _textAlignCenterBtn,
+              _textAlignRightBtn,
+              _textAlignAutoBtn,
+              new Panel { Width = 6 },
+              _textVAlignTopBtn,
+              _textVAlignMiddleBtn,
+              _textVAlignBottomBtn
+            }
+          },
+          new StackLayout
+          {
+            Orientation = Orientation.Horizontal,
+            Spacing = 2,
+            Items = { _textBoldBtn, _textItalicBtn, _textUnderlineBtn }
+          }
         }
       }
     };
 
-    var textSectionContent = new TableLayout
+    var textEditorRow = new Panel
     {
-      Spacing = new Eto.Drawing.Size(0, 0),
-      Rows =
+      Padding = new Eto.Drawing.Padding(10, 2, 6, 2),
+      Height = _textContentArea.Height + 4,
+      Content = _textContentArea
+    };
+    var customTextSectionContent = new StackLayout
+    {
+      Spacing = 0,
+      HorizontalContentAlignment = HorizontalAlignment.Stretch,
+      Items =
       {
-        new TableRow(new TableCell(textTable, true)),
-        new TableRow(new TableCell(_textAlignStylePanel, true)),
-        new TableRow(new TableCell(new Panel { Content = _textContentArea, Padding = new Eto.Drawing.Padding(10, 2, 6, 2) }, true)),
+        textTable,
+        _textAlignStylePanel,
+        textEditorRow,
       }
     };
+    var attributeEditorRow = new Panel
+    {
+      Height = _attributePanel.Height,
+      Content = _attributePanel
+    };
 
-    var generalSection = CreateCollapsibleSection("General", generalTable,
+    var generalSection = CreateFlatSection("General", generalTable,
       () => _generalSectionCollapsed,
       value => SetSectionCollapsed(GeneralSectionCollapsedKey, ref _generalSectionCollapsed, value));
-    _attributesSection = CreateCollapsibleSection("Attribute User Text", _attributePanel,
+    _attributesSection = CreateFlatSection("Attribute User Text", attributeEditorRow,
       () => _attributesSectionCollapsed,
-      value => SetSectionCollapsed(AttributesSectionCollapsedKey, ref _attributesSectionCollapsed, value));
+      value => SetSectionCollapsed(AttributesSectionCollapsedKey, ref _attributesSectionCollapsed, value),
+      _attributePanel, attributeEditorRow, AttributeEditorHeightKey, 70);
     _attributesSection.Visible = false;
-    _textSection = CreateCollapsibleSection("Text", textSectionContent,
+    _textSection = CreateFlatSection("Text", customTextSectionContent,
       () => _textSectionCollapsed,
-      value => SetSectionCollapsed(TextSectionCollapsedKey, ref _textSectionCollapsed, value));
+      value => SetSectionCollapsed(TextSectionCollapsedKey, ref _textSectionCollapsed, value),
+      _textContentArea, textEditorRow, TextEditorHeightKey, 50, 4);
     _textSection.Visible = false;
-    _pictureSection = CreateCollapsibleSection("Picture", _pictureEditor,
+    _pictureSection = CreateFlatSection("Picture", _pictureEditor,
       () => _pictureSectionCollapsed,
       value => SetSectionCollapsed(PictureSectionCollapsedKey, ref _pictureSectionCollapsed, value));
     _pictureSection.Visible = false;
-    _meshSection = CreateCollapsibleSection("Render Mesh Settings", meshTable,
+    _meshSection = CreateFlatSection("Render Mesh Settings", meshTable,
       () => _meshSectionCollapsed,
       value => SetSectionCollapsed(MeshSectionCollapsedKey, ref _meshSectionCollapsed, value));
-    _renderingSection = CreateCollapsibleSection("Rendering", renderingTable,
+    _renderingSection = CreateFlatSection("Rendering", renderingTable,
       () => _renderingSectionCollapsed,
       value => SetSectionCollapsed(RenderingSectionCollapsedKey, ref _renderingSectionCollapsed, value));
-    _isocurveSection = CreateCollapsibleSection("Isocurve Density", isocurveTable,
+    _isocurveSection = CreateFlatSection("Isocurve Density", isocurveTable,
       () => _isocurveSectionCollapsed,
       value => SetSectionCollapsed(IsocurveSectionCollapsedKey, ref _isocurveSectionCollapsed, value));
 
@@ -537,18 +586,30 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     };
     Content = panelScrollable;
 
-    // Min width: the align+style button row controls (padding 10+6, 4×22btn + 3×2sp + 6 + 3×22btn + 2×2sp + 12 + 3×22btn + 2×2sp)
-    MinimumSize = new Size(
-      Math.Max(
-        10 + 4 * 22 + 3 * 2 + 6 + 3 * 22 + 2 * 2 + 12 + 3 * 22 + 2 * 2 + 6,
-        10 + LabelWidth + 4 + ValueWidth + 6),
-      0);
+    MinimumSize = new Size(10 + LabelWidth + 4 + ValueWidth + 6, 0);
 
     Load += (_, _) =>
     {
+      if (!_panelLoaded)
+      {
+        _panelLoaded = true;
+        RhinoDoc.SelectObjects += OnObjectsSelected;
+        RhinoDoc.DeselectObjects += OnObjectsDeselected;
+        RhinoDoc.DeselectAllObjects += OnAllObjectsDeselected;
+        RhinoDoc.ModifyObjectAttributes += OnObjectAttributesChanged;
+        RhinoDoc.LayerTableEvent += OnLayerTableChanged;
+        RhinoDoc.EndOpenDocument += OnDocumentOpened;
+        RhinoDoc.DocumentPropertiesChanged += OnDocumentPropertiesChanged;
+        Rhino.Commands.Command.EndCommand += OnCommandEnded;
+        _layerDropItemsDirty = true;
+      }
+      _pictureEditor.Start();
       Application.Instance.AsyncInvoke(() =>
       {
+        if (!_panelLoaded)
+          return;
         ConfigurePanelScroller(panelScrollable);
+        ConfigureLayerDropVirtualization(_layerDrop);
         InstallTypeDropHoverHandlers();
       });
       var d = RhinoDoc.ActiveDoc;
@@ -556,6 +617,17 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     };
     UnLoad += (_, _) =>
     {
+      _panelLoaded = false;
+      RhinoDoc.SelectObjects -= OnObjectsSelected;
+      RhinoDoc.DeselectObjects -= OnObjectsDeselected;
+      RhinoDoc.DeselectAllObjects -= OnAllObjectsDeselected;
+      RhinoDoc.ModifyObjectAttributes -= OnObjectAttributesChanged;
+      RhinoDoc.LayerTableEvent -= OnLayerTableChanged;
+      RhinoDoc.EndOpenDocument -= OnDocumentOpened;
+      RhinoDoc.DocumentPropertiesChanged -= OnDocumentPropertiesChanged;
+      Rhino.Commands.Command.EndCommand -= OnCommandEnded;
+      _deferredCommandRefreshDoc = null;
+      DetachLayerDropTimingHandlers();
       DetachTypeDropHoverHandlers();
       ClearTypeDropHoverPreview();
       (_nativeTextViewModel as IDisposable)?.Dispose();
@@ -564,18 +636,60 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       _nativeDimensionLeaderViewModel = null;
       _pictureEditor.Stop();
     };
-    RhinoDoc.SelectObjects      += (_, e) => { Log.Write("Event: SelectObjects"); RefreshFromDoc(e.Document); };
-    RhinoDoc.DeselectObjects    += (_, e) => { Log.Write("Event: DeselectObjects"); RefreshFromDoc(e.Document); };
-    RhinoDoc.DeselectAllObjects += (_, e) => { Log.Write("Event: DeselectAllObjects"); RefreshFromDoc(e.Document); };
-    RhinoDoc.ModifyObjectAttributes += (_, e) => OnObjectAttributesModified(e.Document, e.RhinoObject);
-    RhinoDoc.EndOpenDocument          += (_, e) => { _unitPrefsLoadedDocSerial = 0; RefreshFromDoc(e.Document); };
-    RhinoDoc.DocumentPropertiesChanged += (_, e) => { _unitPrefsLoadedDocSerial = 0; RefreshFromDoc(e.Document); };
-
     SetEmptyState();
+  }
+
+  private void OnObjectsSelected(object? sender, RhinoObjectSelectionEventArgs e)
+  {
+    Log.Write("Event: SelectObjects");
+    RefreshFromDoc(e.Document);
+  }
+
+  private void OnObjectsDeselected(object? sender, RhinoObjectSelectionEventArgs e)
+  {
+    Log.Write("Event: DeselectObjects");
+    RefreshFromDoc(e.Document);
+  }
+
+  private void OnAllObjectsDeselected(object? sender, RhinoDeselectAllObjectsEventArgs e)
+  {
+    Log.Write("Event: DeselectAllObjects");
+    RefreshFromDoc(e.Document);
+  }
+
+  private void OnObjectAttributesChanged(object? sender, RhinoModifyObjectAttributesEventArgs e)
+    => OnObjectAttributesModified(e.Document, e.RhinoObject);
+
+  private void OnLayerTableChanged(object? sender, Rhino.DocObjects.Tables.LayerTableEventArgs e)
+  {
+    _layerDropItemsDirty = true;
+    if (ReferenceEquals(_doc, e.Document))
+      RefreshFromDoc(e.Document);
+  }
+
+  private void OnDocumentOpened(object? sender, DocumentOpenEventArgs e)
+  {
+    _unitPrefsLoadedDocSerial = 0;
+    _layerDropItemsDirty = true;
+    RefreshFromDoc(e.Document);
+  }
+
+  private void OnDocumentPropertiesChanged(object? sender, DocumentEventArgs e)
+  {
+    _unitPrefsLoadedDocSerial = 0;
+    RefreshFromDoc(e.Document);
   }
 
   private void RefreshFromDoc(RhinoDoc doc)
   {
+    if (!_panelLoaded)
+      return;
+    if (RhinoApp.InCommand > 0)
+    {
+      _deferredCommandRefreshDoc = doc;
+      return;
+    }
+
     if (_refreshFromDocPending)
     {
       _pendingRefreshDoc = doc;
@@ -590,7 +704,28 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       _refreshFromDocPending = false;
       var refreshDoc = _pendingRefreshDoc ?? doc;
       _pendingRefreshDoc = null;
+      if (!_panelLoaded)
+        return;
+      if (RhinoApp.InCommand > 0)
+      {
+        _deferredCommandRefreshDoc = refreshDoc;
+        return;
+      }
       DoRefreshFromDoc(refreshDoc);
+    });
+  }
+
+  private void OnCommandEnded(object? sender, CommandEventArgs e)
+  {
+    if (_deferredCommandRefreshDoc == null)
+      return;
+
+    Application.Instance.AsyncInvoke(() =>
+    {
+      if (_deferredCommandRefreshDoc is not RhinoDoc doc || RhinoApp.InCommand > 0)
+        return;
+      _deferredCommandRefreshDoc = null;
+      RefreshFromDoc(doc);
     });
   }
 
@@ -721,6 +856,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       // If a specific segment is focused, show only that segment's metrics
       // Otherwise show combined metrics for all segments
       double totalLength = 0.0;
+      var lengths = new List<double>();
       var radii = new List<double>();
       var modelUnits = _doc.ModelUnitSystem;
       
@@ -737,6 +873,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
         if (curve != null)
         {
           double len = curve.GetLength();
+          lengths.Add(len);
           totalLength += len;
           Log.Write($"RefreshForSegmentSelection: segment index={curveInfo.SegmentIndex}, parentId={curveInfo.ParentObject.Id}, length={len}");
           
@@ -760,7 +897,14 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       
       // Update curve fields with segment-specific values
       _totalLengthBox.Text = FormatInfoNumber(ConvertLength(totalLength, modelUnits, totalLengthUnits), _totalLengthUnitDrop);
-      SetEditableTextValue(_curveMetricBox, FormatInfoNumber(ConvertLength(totalLength, modelUnits, curveMetricUnits), _curveMetricUnitDrop));
+      bool lengthsSame = lengths.Count > 0
+        && lengths.All(length => RhinoMath.EpsilonEquals(length, lengths[0], RhinoMath.SqrtEpsilon));
+      string segmentLengthText = lengths.Count == 0
+        ? "-"
+        : lengthsSame
+          ? FormatInfoNumber(ConvertLength(lengths[0], modelUnits, curveMetricUnits), _curveMetricUnitDrop)
+          : VariesText;
+      SetEditableTextValue(_curveMetricBox, segmentLengthText);
       
       Log.Write($"RefreshForSegmentSelection: _totalLengthBox.Text={_totalLengthBox.Text}, _curveMetricBox.Text={_curveMetricBox.Text}");
       
@@ -799,6 +943,17 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
   public void UpdateFromSelection(RhinoDoc? doc, IEnumerable<RhinoObject> objects)
   {
+    long refreshStart = Stopwatch.GetTimestamp();
+    double setupMs = 0;
+    double controlsMs = 0;
+    double layersMs = 0;
+    double displayModesMs = 0;
+    double generalMs = 0;
+    double attributesMs = 0;
+    double pictureMs = 0;
+    double dropdownMs = 0;
+    double textMs = 0;
+    double metricsMs = 0;
     Log.Write($"UpdateFromSelection: called, _focusedSegmentIndex={_focusedSegmentIndex}, _focusedObjectId={_focusedObjectId}");
     _doc = doc;
     EnsureDocUnitPrefsLoaded(doc);
@@ -899,6 +1054,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     }
 
     _isUpdatingUi = true;
+    setupMs = Stopwatch.GetElapsedTime(refreshStart).TotalMilliseconds;
     try
     {
       if (objectList.Count == 0)
@@ -907,6 +1063,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
         return;
       }
 
+      long stageStart = Stopwatch.GetTimestamp();
       // Re-enable all controls that were disabled in SetEmptyState
       SetControlEnabled(_typeDrop, true);
       SetControlEnabled(_nameBox, true);
@@ -956,14 +1113,20 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       SetControlEnabled(_textItalicBtn, true);
       SetControlEnabled(_textUnderlineBtn, true);
 
+    controlsMs = Stopwatch.GetElapsedTime(stageStart).TotalMilliseconds;
+    stageStart = Stopwatch.GetTimestamp();
     _nameBox.Text = CommonOrVaries(objectList, o => SafeString(o.Attributes.Name));
     string layerText = CommonOrVaries(objectList, o => LayerName(doc, o.Attributes.LayerIndex));
     _currentLayerFullPath = layerText;
+    long fieldStart = Stopwatch.GetTimestamp();
     SetLayerDropValue(_layerDrop, doc, layerText, _layerExpandedState);
+    layersMs = Stopwatch.GetElapsedTime(fieldStart).TotalMilliseconds;
     SetDropValue(_displayColorDrop, NormalizeDisplayColorText(CommonOrVaries(objectList, o => SafeString(o.Attributes.ColorSource.ToString()))),
       "By Layer", "By Parent", "By Material", "Custom...");
     UpdateDisplayColorButtonIcon();
+    fieldStart = Stopwatch.GetTimestamp();
     SetDisplayModeDropValue(_displayModeDrop, doc, NormalizeDisplayModeText(CommonOrVaries(objectList, o => (GetPropertyText(o.Attributes, "DisplayModeSource") ?? "By View"))));
+    displayModesMs = Stopwatch.GetElapsedTime(fieldStart).TotalMilliseconds;
     SetLinetypeDropValue(_linetypeDrop, doc, NormalizeLinetypeText(CommonOrVaries(objectList, o => LinetypeText(doc, o.Attributes))));
     string linetypeScaleText = CommonOrVaries(objectList, o => FormatNumber(o.Attributes.LinetypePatternScale));
     SetControlEnabled(_linetypeScaleStepper, linetypeScaleText != VariesText);
@@ -979,8 +1142,13 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       GetPropertyText(o.Attributes, "Url")
       ?? GetPropertyText(o.Attributes, "m_url")
       ?? string.Empty);
+    generalMs = Stopwatch.GetElapsedTime(stageStart).TotalMilliseconds - layersMs - displayModesMs;
+    stageStart = Stopwatch.GetTimestamp();
     UpdateAttributeSection(objectList);
+    attributesMs = Stopwatch.GetElapsedTime(stageStart).TotalMilliseconds;
+    stageStart = Stopwatch.GetTimestamp();
     UpdatePictureSection(objectList);
+    pictureMs = Stopwatch.GetElapsedTime(stageStart).TotalMilliseconds;
 
     var customMeshObjects = objectList.Where(SupportsCustomMesh).ToList();
     bool customMeshApplicable = customMeshObjects.Count > 0;
@@ -1027,10 +1195,15 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _radiusBox.ReadOnly = hasReadOnlyEdgeSelection;
     _diameterBox.ReadOnly = hasReadOnlyEdgeSelection;
     
+    stageStart = Stopwatch.GetTimestamp();
     PopulateTypeDropdown(doc);
+    dropdownMs = Stopwatch.GetElapsedTime(stageStart).TotalMilliseconds;
     
+    stageStart = Stopwatch.GetTimestamp();
     UpdateTextSection(objectList, doc);
+    textMs = Stopwatch.GetElapsedTime(stageStart).TotalMilliseconds;
 
+    stageStart = Stopwatch.GetTimestamp();
     int curveCount = 0;
     double totalCurveLength = 0.0;
 
@@ -1092,6 +1265,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       ? "-"
       : FormatInfoNumber(ConvertLength(totalCurveLength, modelUnits, totalLengthUnits), _totalLengthUnitDrop);
     Log.Write($"UpdateFromSelection: Set _totalLengthBox.Text={_totalLengthBox.Text}");
+    metricsMs = Stopwatch.GetElapsedTime(stageStart).TotalMilliseconds;
 
     bool hasCircle = circleCount > 0;
     bool hasArc = arcCount > 0;
@@ -1280,6 +1454,14 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     finally
     {
       _isUpdatingUi = false;
+      double totalMs = Stopwatch.GetElapsedTime(refreshStart).TotalMilliseconds;
+      if (totalMs >= 100)
+        Log.Write("SelectionTiming", $"objects={objectList.Count}, total={totalMs:0.0}ms, "
+          + $"setup={setupMs:0.0}ms, controls={controlsMs:0.0}ms, "
+          + $"layers={layersMs:0.0}ms, display-modes={displayModesMs:0.0}ms, general={generalMs:0.0}ms, "
+          + $"attributes={attributesMs:0.0}ms, picture={pictureMs:0.0}ms, "
+          + $"dropdown={dropdownMs:0.0}ms, text={textMs:0.0}ms, "
+          + $"metrics={metricsMs:0.0}ms");
     }
   }
 
@@ -1295,7 +1477,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _nameBox.Text = "";
     SetControlEnabled(_nameBox, false);
     _currentLayerFullPath = "-";
-    SetLayerDropValue(_layerDrop, null, "-", _layerExpandedState);
+    SetLayerDropValue(_layerDrop, _doc, "-", _layerExpandedState);
     SetControlEnabled(_layerDrop, false);
     SetDropValue(_displayColorDrop, "-", "By Layer", "By Parent", "By Material", "Custom...");
     SetControlEnabled(_displayColorDrop, false);
@@ -1494,7 +1676,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
   private static string TypeName(RhinoObject obj)
   {
-    if (obj.IsPictureFrame)
+    if (PictureEditorControl.IsPictureObject(obj))
       return "picture surface";
 
     if (obj.ObjectType == ObjectType.Curve)
@@ -1565,7 +1747,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
   private static string BrepOwnerTypeName(RhinoObject obj)
   {
-    if (obj.IsPictureFrame)
+    if (PictureEditorControl.IsPictureObject(obj))
       return "picture surface";
     return obj.Geometry is Brep brep ? BrepTypeName(brep) : "surface";
   }
@@ -2274,31 +2456,16 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     if (componentIndex.Index < 0)
       return false;
 
-    if (obj.Geometry is PolyCurve polyCurve)
+    if (componentIndex.ComponentIndexType == ComponentIndexType.PolycurveSegment
+        && obj.Geometry is Curve parentCurve)
     {
-      var segment = polyCurve.SegmentCurve(componentIndex.Index);
-      if (segment == null)
+      Curve[] segments = DuplicateSelectableSegments(parentCurve);
+      if (componentIndex.Index >= segments.Length)
         return false;
 
       curveInfo = new CurveInfo
       {
-        Curve = segment,
-        ParentObject = obj,
-        IsSegment = true,
-        SegmentIndex = componentIndex.Index
-      };
-      return true;
-    }
-
-    if (obj.Geometry is PolylineCurve polyline)
-    {
-      var points = polyline.ToPolyline();
-      if (points == null || componentIndex.Index >= points.Count - 1)
-        return false;
-
-      curveInfo = new CurveInfo
-      {
-        Curve = new LineCurve(points[componentIndex.Index], points[componentIndex.Index + 1]),
+        Curve = segments[componentIndex.Index],
         ParentObject = obj,
         IsSegment = true,
         SegmentIndex = componentIndex.Index
@@ -2323,6 +2490,35 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     }
 
     return false;
+  }
+
+  private static Curve[] DuplicateSelectableSegments(Curve curve)
+  {
+    try
+    {
+      Curve[]? segments = curve.DuplicateSegments();
+      if (segments != null && segments.Length > 0)
+        return segments;
+    }
+    catch (Exception ex)
+    {
+      Log.Write($"DuplicateSelectableSegments failed for {curve.GetType().Name}: {ex.Message}");
+    }
+
+    return Array.Empty<Curve>();
+  }
+
+  private static bool TryGetSelectableSegment(Curve curve, int segmentIndex, out Curve? segment)
+  {
+    Curve[] segments = DuplicateSelectableSegments(curve);
+    if (segmentIndex < 0 || segmentIndex >= segments.Length)
+    {
+      segment = null;
+      return false;
+    }
+
+    segment = segments[segmentIndex];
+    return true;
   }
 
   private void RefreshFromCurrentSelection()
@@ -2390,7 +2586,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private void UpdatePictureSection(IReadOnlyList<RhinoObject> objects)
   {
     var pictureObjects = objects
-      .Where(obj => obj.IsPictureFrame && obj.RenderMaterial != null)
+      .Where(obj => PictureEditorControl.IsPictureObject(obj)
+        && obj.RenderMaterial != null)
       .ToList();
     _pictureSection.Visible = pictureObjects.Count > 0;
     _pictureEditor.Update(_doc, pictureObjects);
@@ -2810,7 +3007,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
       foreach (var child in children.OrderBy(c => c.SortIndex))
       {
-        string indent = depth <= 0 ? string.Empty : new string(' ', depth * 2);
+        string indent = depth <= 0 ? string.Empty : new string(' ', depth * LayerIndentSpaces);
         int currentIndex = _doc.Layers.FindByFullPath(_currentLayerFullPath, -1);
         bool isCurrent = currentIndex >= 0 && child.Index == currentIndex;
         var item = new ButtonMenuItem
@@ -3866,17 +4063,18 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
       Curve? newParentCurve = null;
 
-      // Handle PolyCurve
-      if (parentCurve is PolyCurve polyCurve)
+      // Rhino component indices address the flattened selectable segments, including
+      // line pieces nested inside polylines and nested polycurves.
+      if (parentCurve is PolyCurve)
       {
+        Curve[] segments = DuplicateSelectableSegments(parentCurve);
+        if (segmentIndex < 0 || segmentIndex >= segments.Length)
+          return;
+
         var newPolyCurve = new PolyCurve();
-        int segmentCount = polyCurve.SegmentCount;
-        
-        for (int i = 0; i < segmentCount; i++)
+        for (int i = 0; i < segments.Length; i++)
         {
-          var segment = polyCurve.SegmentCurve(i);
-          if (segment == null)
-            continue;
+          Curve segment = segments[i];
 
           if (i == segmentIndex)
           {
@@ -3935,34 +4133,24 @@ public sealed class vObjectPropertiesPlusPanel : Panel
         
         newParentCurve = newPolyCurve;
       }
-      // Handle PolylineCurve
       else if (parentCurve is PolylineCurve polylineCurve)
       {
         var points = new List<Point3d>();
-        int pointCount = polylineCurve.PointCount;
-        
-        for (int i = 0; i < pointCount; i++)
-        {
+        for (int i = 0; i < polylineCurve.PointCount; i++)
           points.Add(polylineCurve.Point(i));
-        }
 
-        // For a polyline, segment index i is the line from point i to point i+1
-        if (segmentIndex >= 0 && segmentIndex < points.Count - 1)
-        {
-          Point3d p0 = points[segmentIndex];
-          Point3d p1 = points[segmentIndex + 1];
-          
-          Vector3d direction = p1 - p0;
-          if (!direction.Unitize())
-            return;
-          
-          // Move p1 to achieve target length
-          Point3d newEnd = p0 + direction * targetLength;
-          points[segmentIndex + 1] = newEnd;
-          if (polylineCurve.IsClosed && segmentIndex == points.Count - 2)
-            points[0] = newEnd;
-        }
+        if (segmentIndex < 0 || segmentIndex >= points.Count - 1)
+          return;
 
+        Point3d start = points[segmentIndex];
+        Vector3d direction = points[segmentIndex + 1] - start;
+        if (!direction.Unitize())
+          return;
+
+        Point3d newEnd = start + direction * targetLength;
+        points[segmentIndex + 1] = newEnd;
+        if (polylineCurve.IsClosed && segmentIndex == points.Count - 2)
+          points[0] = newEnd;
         newParentCurve = new PolylineCurve(points);
       }
 
@@ -4017,18 +4205,12 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private static bool TryGetSegmentLength(Curve parentCurve, int segmentIndex, out double length)
   {
     length = 0.0;
-    if (parentCurve is PolyCurve polyCurve && segmentIndex >= 0 && segmentIndex < polyCurve.SegmentCount)
+    if (parentCurve is PolyCurve or PolylineCurve)
     {
-      var segment = polyCurve.SegmentCurve(segmentIndex);
-      if (segment == null)
+      Curve[] segments = DuplicateSelectableSegments(parentCurve);
+      if (segmentIndex < 0 || segmentIndex >= segments.Length)
         return false;
-      length = segment.GetLength();
-      return true;
-    }
-
-    if (parentCurve is PolylineCurve polylineCurve && segmentIndex >= 0 && segmentIndex < polylineCurve.PointCount - 1)
-    {
-      length = polylineCurve.Point(segmentIndex).DistanceTo(polylineCurve.Point(segmentIndex + 1));
+      length = segments[segmentIndex].GetLength();
       return true;
     }
 
@@ -4064,17 +4246,16 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     {
       Curve? newParentCurve = null;
 
-      // Handle PolyCurve
-      if (parentCurve is PolyCurve polyCurve)
+      if (parentCurve is PolyCurve or PolylineCurve)
       {
+        Curve[] segments = DuplicateSelectableSegments(parentCurve);
+        if (_focusedSegmentIndex < 0 || _focusedSegmentIndex >= segments.Length)
+          return;
+
         var newPolyCurve = new PolyCurve();
-        int segmentCount = polyCurve.SegmentCount;
-        
-        for (int i = 0; i < segmentCount; i++)
+        for (int i = 0; i < segments.Length; i++)
         {
-          var segment = polyCurve.SegmentCurve(i);
-          if (segment == null)
-            continue;
+          Curve segment = segments[i];
 
           if (i == _focusedSegmentIndex && segment is ArcCurve arc)
           {
@@ -4099,10 +4280,9 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       {
         changed = _doc.Objects.Replace(parentObj.Id, newParentCurve);
         
-        if (changed && newParentCurve is PolyCurve pc && _focusedSegmentIndex < pc.SegmentCount)
+        if (changed && TryGetSelectableSegment(newParentCurve, _focusedSegmentIndex, out Curve? resultSegment))
         {
           // Debug: verify the actual radius achieved
-          var resultSegment = pc.SegmentCurve(_focusedSegmentIndex);
           if (resultSegment is ArcCurve resultArc)
           {
             double actualRadius = resultArc.Arc.Radius;
@@ -5106,6 +5286,9 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
   private sealed class LayerDropItem
   {
+    private Image? _swatch;
+    private readonly bool _expanded;
+
     public LayerDropItem(string name, int layerIndex, Guid layerId, string displayText, Color color, bool isToggle, bool expanded = true)
     {
       Name = name;
@@ -5113,7 +5296,9 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       LayerId = layerId;
       DisplayText = displayText;
       IsToggle = isToggle;
-      Swatch = isToggle ? CreateToggleSwatch(expanded) : CreateColorSwatch(color);
+      SwatchColor = color;
+      _expanded = expanded;
+      _swatch = isToggle ? CreateToggleSwatch(expanded) : CreateColorSwatch(color);
     }
 
     public string Name { get; }
@@ -5121,7 +5306,14 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     public Guid LayerId { get; }
     public string DisplayText { get; }
     public bool IsToggle { get; }
-    public Image Swatch { get; }
+    public Color SwatchColor { get; }
+    public Image Swatch => _swatch ??= IsToggle ? CreateToggleSwatch(_expanded) : CreateColorSwatch(SwatchColor);
+
+    public void DisposeSwatch()
+    {
+      _swatch?.Dispose();
+      _swatch = null;
+    }
 
     public override string ToString() => Name;
 
@@ -5167,15 +5359,20 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     private static Bitmap CreateColorSwatch(Color color)
     {
       var bitmap = new Bitmap(18, 18, PixelFormat.Format32bppRgba);
-      using (var g = new Graphics(bitmap))
+      var light = Color.Blend(Color.FromArgb(242, 242, 242), color);
+      var dark = Color.Blend(Color.FromArgb(191, 191, 191), color);
+      // Avoid initializing the WPF drawing pipeline for an 18-pixel swatch.
+      using (var pixels = bitmap.Lock())
       {
-        // Checkerboard underlay for alpha-aware swatches.
-        g.FillRectangle(Color.FromArgb(242, 242, 242), 0, 0, 9, 9);
-        g.FillRectangle(Color.FromArgb(191, 191, 191), 9, 0, 9, 9);
-        g.FillRectangle(Color.FromArgb(191, 191, 191), 0, 9, 9, 9);
-        g.FillRectangle(Color.FromArgb(242, 242, 242), 9, 9, 9, 9);
-        g.FillRectangle(color, 0, 0, 18, 18);
-        g.DrawRectangle(Colors.Black, 0, 0, 17, 17);
+        for (int y = 0; y < 18; y++)
+        {
+          for (int x = 0; x < 18; x++)
+          {
+            bool border = x == 0 || y == 0 || x == 17 || y == 17;
+            pixels.SetPixel(x, y, border ? Colors.Black
+              : (x < 9) == (y < 9) ? light : dark);
+          }
+        }
       }
       return bitmap;
     }
@@ -5291,17 +5488,28 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     }
   }
 
-  private static void SetLayerDropValue(DropDown dropDown, RhinoDoc? doc, string current, Dictionary<Guid, bool> expandedState)
+  private void SetLayerDropValue(DropDown dropDown, RhinoDoc? doc, string current, Dictionary<Guid, bool> expandedState)
   {
-    var list = new List<LayerDropItem>();
+    Stopwatch? rebuildTimer = null;
+    double cacheBuildMs = 0;
+    int newSwatches = 0;
+    var retiredItems = new List<LayerDropItem>();
     string normalized = SafeString(current).Trim();
     if (string.IsNullOrEmpty(normalized))
       normalized = "-";
 
-    if (doc != null)
+    uint docSerial = doc?.RuntimeSerialNumber ?? 0;
+    Guid viewportId = doc?.Views.ActiveView?.ActiveViewportID ?? Guid.Empty;
+    if (doc != null && (_layerDropItemsDirty || _layerDropDocSerial != docSerial
+        || _layerDropViewportId != viewportId))
     {
+      rebuildTimer = Stopwatch.StartNew();
       try
       {
+        var previousItems = _layerDropDocSerial == docSerial
+          ? _layerDropItems.ToDictionary(item => item.LayerId)
+          : new Dictionary<Guid, LayerDropItem>();
+        var rebuiltItems = new List<LayerDropItem>();
         var all = doc.Layers.Cast<Layer>()
           .Where(l => l != null && !l.IsDeleted && !string.IsNullOrWhiteSpace(l.FullPath))
           .OrderBy(l => l.SortIndex)
@@ -5324,60 +5532,69 @@ public sealed class vObjectPropertiesPlusPanel : Panel
           if (!byParent.TryGetValue(parentId, out var children))
             return;
 
-          foreach (var child in children.OrderBy(c => c.SortIndex))
+          foreach (var child in children)
           {
-            string indent = depth <= 0 ? string.Empty : new string(' ', depth * 2);
-            var swatchColor = ResolveLayerDisplayColor(doc, child);
-            list.Add(new LayerDropItem(child.FullPath, child.Index, child.Id, indent + child.Name, ToEtoColor(swatchColor), false));
+            string indent = depth <= 0 ? string.Empty : new string(' ', depth * LayerIndentSpaces);
+            string fullPath = child.FullPath;
+            string displayText = indent + child.Name;
+            var swatchColor = ToEtoColor(ResolveLayerDisplayColor(doc, child));
+            if (!previousItems.TryGetValue(child.Id, out LayerDropItem? item)
+                || item.Name != fullPath || item.DisplayText != displayText
+                || item.LayerIndex != child.Index || item.SwatchColor.ToArgb() != swatchColor.ToArgb())
+            {
+              item = new LayerDropItem(fullPath, child.Index, child.Id, displayText, swatchColor, false);
+              newSwatches++;
+            }
+            rebuiltItems.Add(item);
             AddChildrenFlat(child.Id, depth + 1);
           }
         }
 
         AddChildrenFlat(Guid.Empty, 0);
+        var retainedItems = rebuiltItems.ToHashSet();
+        retiredItems.AddRange(_layerDropItems.Where(item => !retainedItems.Contains(item)));
+        _layerDropItems = rebuiltItems;
+        _layerDropDocSerial = docSerial;
+        _layerDropViewportId = viewportId;
+        _layerDropItemsDirty = false;
       }
-      catch
+      catch (Exception ex)
       {
+        Log.Write($"SetLayerDropValue failed: {ex.Message}");
       }
+      cacheBuildMs = rebuildTimer.Elapsed.TotalMilliseconds;
     }
 
+    var list = doc != null && _layerDropDocSerial == docSerial
+      ? new List<LayerDropItem>(_layerDropItems)
+      : new List<LayerDropItem>();
     if (!list.Any(i => i.Name == normalized))
-      list.Insert(0, new LayerDropItem(normalized, -1, Guid.Empty, normalized, Colors.White, false));
+    {
+      LayerDropItem? statusItem = _layerDropStatusItem;
+      if (statusItem == null || statusItem.Name != normalized)
+      {
+        if (statusItem != null)
+          retiredItems.Add(statusItem);
+        statusItem = new LayerDropItem(normalized, -1, Guid.Empty, normalized, Colors.White, false);
+        _layerDropStatusItem = statusItem;
+      }
+      list.Insert(0, statusItem);
+    }
 
     int newSelectedIndex = Math.Max(0, list.FindIndex(i => i.Name == normalized));
 
-    bool sameData = false;
-    if (dropDown.DataStore is IEnumerable<LayerDropItem> existing)
-    {
-      var existingList = existing.ToList();
-      if (existingList.Count == list.Count)
-      {
-        sameData = true;
-        for (int i = 0; i < list.Count; i++)
-        {
-          var a = existingList[i];
-          var b = list[i];
-          if (!string.Equals(a.Name, b.Name, StringComparison.Ordinal)
-            || !string.Equals(a.DisplayText, b.DisplayText, StringComparison.Ordinal)
-            || a.LayerIndex != b.LayerIndex)
-          {
-            sameData = false;
-            break;
-          }
-        }
-      }
-    }
-
-    if (sameData)
-    {
-      if (dropDown.SelectedIndex != newSelectedIndex)
-        dropDown.SelectedIndex = newSelectedIndex;
-      return;
-    }
-
-    dropDown.DataStore = list;
-    dropDown.ItemTextBinding = Binding.Property<LayerDropItem, string>(i => i.DisplayText);
-    dropDown.ItemImageBinding = Binding.Property<LayerDropItem, Image>(i => i.Swatch);
-    dropDown.SelectedIndex = newSelectedIndex;
+    bool sameData = dropDown.DataStore is IEnumerable<LayerDropItem> existing
+      && existing.SequenceEqual(list);
+    if (!sameData)
+      dropDown.DataStore = list;
+    if (dropDown.SelectedIndex != newSelectedIndex)
+      dropDown.SelectedIndex = newSelectedIndex;
+    foreach (var item in retiredItems)
+      item.DisposeSwatch();
+    if (rebuildTimer != null)
+      Log.Write("LayerTiming", $"Cache prepared: layers={_layerDropItems.Count}, "
+        + $"newSwatches={newSwatches}, cache={cacheBuildMs:0.0}ms, "
+        + $"binding={rebuildTimer.Elapsed.TotalMilliseconds - cacheBuildMs:0.0}ms");
   }
 
   private static System.Drawing.Color ResolveLayerDisplayColor(RhinoDoc doc, Layer layer)
@@ -5538,6 +5755,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
   private static TableRow NewBorderedRow(Control left, Control right)
   {
+    if (left is Label label)
+      label.Wrap = WrapMode.Word;
     return new TableRow(
       new TableCell(left, false),
       new TableCell(right, true)
@@ -5615,6 +5834,102 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     native.VerticalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Auto;
   }
 
+  private void ConfigureLayerDropVirtualization(DropDown dropDown)
+  {
+    try
+    {
+      object handler = dropDown.Handler;
+      Type handlerType = handler.GetType();
+      handlerType.GetProperty("AllowVirtualization")?.SetValue(handler, true);
+      handlerType.GetProperty("VirtualizationThreshold")?.SetValue(handler, 1);
+
+      var root = dropDown.ControlObject as System.Windows.DependencyObject;
+      var native = root as System.Windows.Controls.ComboBox
+        ?? FindVisualChild<System.Windows.Controls.ComboBox>(root);
+      if (native == null)
+        return;
+
+      if (!ReferenceEquals(_nativeLayerDrop, native))
+      {
+        DetachLayerDropTimingHandlers();
+        _nativeLayerDrop = native;
+        _layerDropFirstOpen = true;
+        native.PreviewMouseDown += OnNativeLayerDropMouseDown;
+        native.PreviewKeyDown += OnNativeLayerDropKeyDown;
+        native.DropDownOpened += OnNativeLayerDropOpened;
+        native.DropDownClosed += OnNativeLayerDropClosed;
+      }
+
+      var panel = new System.Windows.FrameworkElementFactory(
+        typeof(System.Windows.Controls.VirtualizingStackPanel));
+      native.ItemsPanel = new System.Windows.Controls.ItemsPanelTemplate(panel);
+      System.Windows.Controls.VirtualizingPanel.SetIsVirtualizing(native, true);
+      System.Windows.Controls.VirtualizingPanel.SetVirtualizationMode(native,
+        System.Windows.Controls.VirtualizationMode.Recycling);
+      System.Windows.Controls.ScrollViewer.SetCanContentScroll(native, true);
+      native.ApplyTemplate();
+    }
+    catch (Exception ex)
+    {
+      Log.Write($"ConfigureLayerDropVirtualization failed: {ex.Message}");
+    }
+  }
+
+  private void DetachLayerDropTimingHandlers()
+  {
+    if (_nativeLayerDrop != null)
+    {
+      _nativeLayerDrop.PreviewMouseDown -= OnNativeLayerDropMouseDown;
+      _nativeLayerDrop.PreviewKeyDown -= OnNativeLayerDropKeyDown;
+      _nativeLayerDrop.DropDownOpened -= OnNativeLayerDropOpened;
+      _nativeLayerDrop.DropDownClosed -= OnNativeLayerDropClosed;
+    }
+    _nativeLayerDrop = null;
+    _layerDropOpenTimer = null;
+  }
+
+  private void OnNativeLayerDropMouseDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+  {
+    if (e.ChangedButton == System.Windows.Input.MouseButton.Left
+      && _nativeLayerDrop?.IsDropDownOpen == false)
+      _layerDropOpenTimer = Stopwatch.StartNew();
+  }
+
+  private void OnNativeLayerDropKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+  {
+    if (_nativeLayerDrop?.IsDropDownOpen == false
+      && (e.Key == System.Windows.Input.Key.F4
+        || (e.SystemKey == System.Windows.Input.Key.Down
+          && System.Windows.Input.Keyboard.Modifiers.HasFlag(System.Windows.Input.ModifierKeys.Alt))))
+      _layerDropOpenTimer = Stopwatch.StartNew();
+  }
+
+  private void OnNativeLayerDropOpened(object? sender, EventArgs e)
+  {
+    var native = _nativeLayerDrop;
+    if (native == null)
+      return;
+    Stopwatch timer = _layerDropOpenTimer ??= Stopwatch.StartNew();
+    double openMs = timer.Elapsed.TotalMilliseconds;
+    bool first = _layerDropFirstOpen;
+    _layerDropFirstOpen = false;
+    native.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded,
+      new Action(() =>
+      {
+        if (!_panelLoaded || !ReferenceEquals(_layerDropOpenTimer, timer))
+          return;
+        timer.Stop();
+        _layerDropOpenTimer = null;
+        double totalMs = timer.Elapsed.TotalMilliseconds;
+        if (first || totalMs >= 100)
+          Log.Write("LayerTiming", $"Popup: first={first}, items={native.Items.Count}, "
+            + $"open={openMs:0.0}ms, layout={totalMs - openMs:0.0}ms, total={totalMs:0.0}ms");
+      }));
+  }
+
+  private void OnNativeLayerDropClosed(object? sender, EventArgs e)
+    => _layerDropOpenTimer = null;
+
   private static T? FindVisualChild<T>(System.Windows.DependencyObject? root)
     where T : System.Windows.DependencyObject
   {
@@ -5656,110 +5971,217 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     return null;
   }
 
-  private GroupBox CreateCollapsibleSection(string title, Control content,
-    Func<bool> getCollapsed, Action<bool> setCollapsed)
+  private static int LoadPersistedEditorHeight(string settingKey, int defaultHeight, int minimumHeight)
   {
-    var group = new GroupBox { Text = "", Content = content };
-    InstallCollapsibleGroupHeader(group, content, title, getCollapsed, setCollapsed);
-    return group;
+    try
+    {
+      int height = vObjectPropertiesPlusPlugIn.Instance.Settings.GetInteger(settingKey, defaultHeight);
+      return Math.Max(minimumHeight, height);
+    }
+    catch (Exception ex)
+    {
+      Log.Write($"LoadPersistedEditorHeight failed for {settingKey}: {ex.Message}");
+      return defaultHeight;
+    }
   }
 
-  private void InstallCollapsibleGroupHeader(GroupBox group, Control content, string title,
-    Func<bool> getCollapsed, Action<bool> setCollapsed)
+  private static bool TryLoadPersistedEditorHeight(string settingKey, int minimumHeight, out int height)
   {
-    System.Windows.Controls.StackPanel? headerPanel = null;
-    System.Windows.Controls.Button? collapseButton = null;
-    System.Windows.Controls.GroupBox? nativeGroup = null;
-
-    static System.Windows.Shapes.Polyline DisclosureChevron(bool collapsed)
+    height = minimumHeight;
+    try
     {
-      var points = new System.Windows.Media.PointCollection();
-      if (collapsed)
-      {
-        points.Add(new System.Windows.Point(4, 2));
-        points.Add(new System.Windows.Point(8, 6));
-        points.Add(new System.Windows.Point(4, 10));
-      }
-      else
-      {
-        points.Add(new System.Windows.Point(2, 4));
-        points.Add(new System.Windows.Point(6, 8));
-        points.Add(new System.Windows.Point(10, 4));
-      }
+      var settings = vObjectPropertiesPlusPlugIn.Instance.Settings;
+      if (!settings.TryGetInteger(settingKey, out int savedHeight))
+        return false;
 
-      return new System.Windows.Shapes.Polyline
+      height = Math.Max(minimumHeight, savedHeight);
+      return true;
+    }
+    catch (Exception ex)
+    {
+      Log.Write($"TryLoadPersistedEditorHeight failed for {settingKey}: {ex.Message}");
+      return false;
+    }
+  }
+
+  private static void SavePersistedEditorHeight(string settingKey, int height)
+  {
+    try
+    {
+      var plugIn = vObjectPropertiesPlusPlugIn.Instance;
+      plugIn.Settings.SetInteger(settingKey, height);
+      plugIn.SaveSettings();
+    }
+    catch (Exception ex)
+    {
+      Log.Write($"SavePersistedEditorHeight failed for {settingKey}: {ex.Message}");
+    }
+  }
+
+  private static Control NewSectionDivider(Func<Control?>? getResizeTarget = null,
+    Action<Control, int>? applyHeight = null, string? settingKey = null,
+    int minimumHeight = 0, Func<bool>? collapsed = null)
+  {
+    var divider = new Drawable
+    {
+      Height = 7,
+      Cursor = getResizeTarget == null ? Cursors.Default : Cursors.HorizontalSplit,
+      ToolTip = getResizeTarget == null ? string.Empty : "Drag to resize"
+    };
+    divider.Paint += (_, e) =>
+    {
+      float width = Math.Max(0, divider.ClientSize.Width - 16);
+      e.Graphics.FillRectangle(Color.FromArgb(222, 226, 233), 8, 3, width, 1);
+    };
+
+    if (getResizeTarget == null || applyHeight == null || settingKey == null)
+      return divider;
+
+    bool dragging = false;
+    bool moved = false;
+    float startScreenY = 0;
+    int startHeight = 0;
+    Control? target = null;
+    divider.MouseDown += (_, e) =>
+    {
+      if ((e.Buttons & MouseButtons.Primary) == 0 || collapsed?.Invoke() == true)
+        return;
+      target = getResizeTarget();
+      if (target == null)
+        return;
+      if (!divider.CaptureMouse())
+        return;
+      dragging = true;
+      moved = false;
+      startScreenY = divider.PointToScreen(e.Location).Y;
+      startHeight = target.Height > 0
+        ? target.Height
+        : Math.Max(minimumHeight, target.Bounds.Height);
+      e.Handled = true;
+    };
+    divider.MouseMove += (_, e) =>
+    {
+      if (!dragging || target == null)
+        return;
+      int height = Math.Max(minimumHeight,
+        startHeight + (int)Math.Round(divider.PointToScreen(e.Location).Y - startScreenY));
+      if (height == target.Height)
+        return;
+      applyHeight(target, height);
+      moved = true;
+      e.Handled = true;
+    };
+    divider.MouseUp += (_, e) =>
+    {
+      if (!dragging)
+        return;
+      dragging = false;
+      divider.ReleaseMouseCapture();
+      if (moved && target != null)
+        SavePersistedEditorHeight(settingKey, target.Height);
+      target = null;
+      e.Handled = true;
+    };
+    return divider;
+  }
+
+  private static Control? GetNativeAnnotationEditor(Control? panel)
+  {
+    for (Type? type = panel?.GetType(); type != null; type = type.BaseType)
+    {
+      FieldInfo? field = type.GetField("m_textarea",
+        BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+      if (field != null)
+        return field.GetValue(panel) as Control;
+    }
+    return null;
+  }
+
+  private static void ResizeNativeAnnotationEditor(Control editor, int height)
+  {
+    editor.Height = height;
+    foreach (string propertyName in new[] { "RichTextArea", "AlternateTextArea" })
+    {
+      if (editor.GetType().GetProperty(propertyName)?.GetValue(editor) is Control textArea)
+        textArea.Height = height;
+    }
+    (editor.ControlObject as System.Windows.FrameworkElement)?.InvalidateMeasure();
+    (editor.Parent?.ControlObject as System.Windows.FrameworkElement)?.InvalidateMeasure();
+  }
+
+  private static void RestoreNativeEditorHeight(Control panel, string settingKey)
+  {
+    if (TryLoadPersistedEditorHeight(settingKey, 50, out int height)
+        && GetNativeAnnotationEditor(panel) is Control editor)
+      ResizeNativeAnnotationEditor(editor, height);
+  }
+
+  private static Control NewUnframedSection(Control content,
+    Func<Control?>? getEditor = null, string? settingKey = null)
+  {
+    return new StackLayout
+    {
+      Spacing = 0,
+      HorizontalContentAlignment = HorizontalAlignment.Stretch,
+      Items =
       {
-        Points = points,
-        Stroke = System.Windows.SystemColors.ControlTextBrush,
-        StrokeThickness = 1.5,
-        StrokeLineJoin = System.Windows.Media.PenLineJoin.Round,
-        StrokeStartLineCap = System.Windows.Media.PenLineCap.Round,
-        StrokeEndLineCap = System.Windows.Media.PenLineCap.Round,
-        Width = 12,
-        Height = 12,
+        content,
+        NewSectionDivider(getEditor, getEditor == null ? null : ResizeNativeAnnotationEditor,
+          settingKey, 50)
+      }
+    };
+  }
+
+  private Panel CreateFlatSection(string title, Control content,
+    Func<bool> getCollapsed, Action<bool> setCollapsed,
+    Control? resizeTarget = null, Control? resizeRow = null,
+    string? heightKey = null, int minimumHeight = 0, int rowPadding = 0)
+  {
+    Expander? expander = null;
+    try
+    {
+      Type? nativeType = typeof(Rhino.UI.ObjectProperties.UserStringsPanelControl)
+        .Assembly.GetType("Rhino.UI.Controls.EmphasizedExpander");
+      if (nativeType != null)
+        expander = Activator.CreateInstance(nativeType, new object?[] { title, null }) as Expander;
+    }
+    catch (Exception ex)
+    {
+      Log.Write($"CreateFlatSection: native expander unavailable for {title}: {ex.Message}");
+    }
+    expander ??= new Expander { Header = new Label { Text = title } };
+    expander.Content = content;
+    expander.Expanded = !getCollapsed();
+    Control? divider = null;
+    Control sectionContent = expander;
+    if (resizeTarget != null && resizeRow != null && heightKey != null)
+    {
+      divider = NewSectionDivider(() => resizeTarget, (target, height) =>
+      {
+        target.Height = height;
+        resizeRow.Height = height + rowPadding;
+        (resizeRow.ControlObject as System.Windows.FrameworkElement)?.InvalidateMeasure();
+      }, heightKey, minimumHeight, getCollapsed);
+      divider.Visible = expander.Expanded;
+      sectionContent = new StackLayout
+      {
+        Spacing = 0,
+        HorizontalContentAlignment = HorizontalAlignment.Stretch,
+        Items = { expander, divider }
       };
     }
-
-    void ApplyCollapsedState()
+    expander.ExpandedChanged += (_, _) =>
     {
-      bool collapsed = getCollapsed();
-      content.Visible = !collapsed;
-      if (collapseButton != null)
-      {
-        collapseButton.Content = DisclosureChevron(collapsed);
-        collapseButton.ToolTip = collapsed ? $"Restore {title}" : $"Collapse {title}";
-      }
+      bool collapsed = !expander.Expanded;
+      setCollapsed(collapsed);
+      if (divider != null)
+        divider.Visible = !collapsed;
+    };
 
-      nativeGroup?.InvalidateMeasure();
-    }
-
-    void Install()
+    return new Panel
     {
-      if (group.ControlObject is not System.Windows.Controls.GroupBox native)
-        return;
-
-      nativeGroup = native;
-      if (headerPanel == null)
-      {
-        headerPanel = new System.Windows.Controls.StackPanel
-        {
-          Orientation = System.Windows.Controls.Orientation.Horizontal,
-          VerticalAlignment = System.Windows.VerticalAlignment.Center,
-        };
-
-        collapseButton = new System.Windows.Controls.Button
-        {
-          Content = DisclosureChevron(getCollapsed()),
-          Width = 18,
-          Height = 18,
-          Padding = new System.Windows.Thickness(0),
-          Margin = new System.Windows.Thickness(0, 0, 3, 0),
-          Background = System.Windows.Media.Brushes.Transparent,
-          BorderBrush = System.Windows.Media.Brushes.Transparent,
-          HorizontalContentAlignment = System.Windows.HorizontalAlignment.Center,
-          VerticalContentAlignment = System.Windows.VerticalAlignment.Center,
-          Focusable = false,
-        };
-        collapseButton.Click += (_, _) =>
-        {
-          setCollapsed(!getCollapsed());
-          ApplyCollapsedState();
-        };
-        headerPanel.Children.Add(collapseButton);
-        headerPanel.Children.Add(new System.Windows.Controls.TextBlock
-        {
-          Text = title,
-          VerticalAlignment = System.Windows.VerticalAlignment.Center,
-        });
-      }
-
-      native.Header = headerPanel;
-      ApplyCollapsedState();
-    }
-
-    content.Visible = !getCollapsed();
-    Install();
-    group.Load += (_, _) => Install();
+      Content = sectionContent
+    };
   }
 
   private void LoadSectionCollapseStates()
@@ -5857,7 +6279,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
   private static bool SupportsCustomMesh(RhinoObject obj)
   {
-    return !obj.IsPictureFrame
+    return !PictureEditorControl.IsPictureObject(obj)
       && (obj.Geometry is Brep
       || obj.Geometry is Extrusion
       || obj.Geometry is Mesh
@@ -5867,7 +6289,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
   private static bool SupportsIsocurve(RhinoObject obj)
   {
-    return !obj.IsPictureFrame
+    return !PictureEditorControl.IsPictureObject(obj)
       && (obj.Geometry is Brep
       || obj.Geometry is Extrusion
       || obj.Geometry is Surface
@@ -5876,7 +6298,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
   private static bool SupportsRendering(RhinoObject obj)
   {
-    return obj.IsPictureFrame
+    return PictureEditorControl.IsPictureObject(obj)
       || obj.Geometry is Brep
       || obj.Geometry is Extrusion
       || obj.Geometry is Mesh
@@ -6184,8 +6606,9 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
       (_nativeDimensionLeaderViewModel as IDisposable)?.Dispose();
       _nativeDimensionLeaderViewModel = viewModel;
-      if (!ReferenceEquals(_nativeDimensionLeaderPanelHost.Content, panel))
-        _nativeDimensionLeaderPanelHost.Content = panel;
+      if (!ReferenceEquals(_nativeDimensionLeaderPanelContent.Content, panel))
+        _nativeDimensionLeaderPanelContent.Content = panel;
+      RestoreNativeEditorHeight(panel, "Panel.DimensionLeaderEditorHeight");
       return true;
     }
     catch (Exception ex)
@@ -6241,6 +6664,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
       (_nativeTextViewModel as IDisposable)?.Dispose();
       _nativeTextViewModel = viewModel;
+      RestoreNativeEditorHeight(_nativeTextPanel, NativeTextEditorHeightKey);
       return true;
     }
     catch (Exception ex)

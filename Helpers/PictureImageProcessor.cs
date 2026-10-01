@@ -1,9 +1,11 @@
 using System;
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace vObjectPropertiesPlus.Helpers;
@@ -11,6 +13,12 @@ namespace vObjectPropertiesPlus.Helpers;
 [SupportedOSPlatform("windows")]
 internal static class PictureImageProcessor
 {
+  private const long MaxProcessedPixels = 4_000_000;
+  private const int MaxProcessedDimension = 4096;
+  private static readonly object TemporaryFilesLock = new();
+  private static readonly HashSet<string> TemporaryFiles =
+    new(StringComparer.OrdinalIgnoreCase);
+
   internal const string UnsharpMask = "Unsharp mask";
   internal const string Laplacian = "Laplacian";
   internal const string HighPass = "High pass";
@@ -22,29 +30,149 @@ internal static class PictureImageProcessor
     HighPass
   };
 
-  internal static Bitmap SharpenFile(string path, int level, string algorithm)
+  internal static Bitmap SharpenFile(string path, int level, string algorithm,
+    CancellationToken cancellationToken)
   {
+    var totalTimer = Stopwatch.StartNew();
+    var stageTimer = Stopwatch.StartNew();
     using var loaded = new Bitmap(path);
-    var source = new Bitmap(loaded.Width, loaded.Height, PixelFormat.Format32bppArgb);
+    cancellationToken.ThrowIfCancellationRequested();
+    double loadMs = stageTimer.Elapsed.TotalMilliseconds;
+    stageTimer.Restart();
+    Size outputSize = BoundedOutputSize(loaded.Width, loaded.Height);
+    var source = new Bitmap(outputSize.Width, outputSize.Height,
+      PixelFormat.Format32bppArgb);
     using (var graphics = Graphics.FromImage(source))
     {
       graphics.CompositingMode = CompositingMode.SourceCopy;
-      graphics.DrawImageUnscaled(loaded, 0, 0);
+      graphics.CompositingQuality = CompositingQuality.HighQuality;
+      graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+      graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+      graphics.DrawImage(loaded, new Rectangle(Point.Empty, outputSize));
     }
+    cancellationToken.ThrowIfCancellationRequested();
+    double resampleMs = stageTimer.Elapsed.TotalMilliseconds;
+
+    if (outputSize.Width != loaded.Width || outputSize.Height != loaded.Height)
+      Log.Write($"Picture sharpen bounded '{path}' from {loaded.Width}x{loaded.Height} "
+        + $"to {outputSize.Width}x{outputSize.Height}");
 
     int clampedLevel = Math.Clamp(level, 0, 100);
     if (clampedLevel == 0)
+    {
+      Log.Write("PictureTiming", $"Sharpness pixels: algorithm={algorithm}, level=0, "
+        + $"input={loaded.Width}x{loaded.Height}, output={source.Width}x{source.Height}, "
+        + $"total={totalTimer.Elapsed.TotalMilliseconds:0.0}ms, load={loadMs:0.0}ms, "
+        + $"resample={resampleMs:0.0}ms");
       return source;
+    }
 
+    stageTimer.Restart();
     byte[] input = ReadPixels(source);
+    cancellationToken.ThrowIfCancellationRequested();
+    double readMs = stageTimer.Elapsed.TotalMilliseconds;
+    stageTimer.Restart();
     byte[] output = algorithm switch
     {
       Laplacian => ApplyLaplacian(input, source.Width, source.Height, clampedLevel),
       HighPass => ApplyHighPass(input, source.Width, source.Height, clampedLevel),
       _ => ApplyUnsharpMask(input, source.Width, source.Height, clampedLevel)
     };
+    cancellationToken.ThrowIfCancellationRequested();
+    double filterMs = stageTimer.Elapsed.TotalMilliseconds;
+    stageTimer.Restart();
     WritePixels(source, output);
+    double writeMs = stageTimer.Elapsed.TotalMilliseconds;
+    Log.Write("PictureTiming", $"Sharpness pixels: algorithm={algorithm}, level={clampedLevel}, "
+      + $"input={loaded.Width}x{loaded.Height}, output={source.Width}x{source.Height}, "
+      + $"total={totalTimer.Elapsed.TotalMilliseconds:0.0}ms, load={loadMs:0.0}ms, "
+      + $"resample={resampleMs:0.0}ms, read={readMs:0.0}ms, "
+      + $"filter={filterMs:0.0}ms, write={writeMs:0.0}ms");
     return source;
+  }
+
+  internal static string SharpenToTemporaryFile(string path, int level, string algorithm,
+    CancellationToken cancellationToken)
+  {
+    var totalTimer = Stopwatch.StartNew();
+    string directory = Path.Combine(Path.GetTempPath(), "vObjectPropertiesPlus");
+    Directory.CreateDirectory(directory);
+    string outputPath = Path.Combine(directory, $"sharp-{Guid.NewGuid():N}.png");
+    try
+    {
+      var stageTimer = Stopwatch.StartNew();
+      using Bitmap bitmap = SharpenFile(path, level, algorithm, cancellationToken);
+      double processMs = stageTimer.Elapsed.TotalMilliseconds;
+      cancellationToken.ThrowIfCancellationRequested();
+      stageTimer.Restart();
+      bitmap.Save(outputPath, ImageFormat.Png);
+      double encodeMs = stageTimer.Elapsed.TotalMilliseconds;
+      cancellationToken.ThrowIfCancellationRequested();
+      lock (TemporaryFilesLock)
+        TemporaryFiles.Add(outputPath);
+      long bytes = new FileInfo(outputPath).Length;
+      Log.Write("PictureTiming", $"Sharpness export: algorithm={algorithm}, level={level}, "
+        + $"size={bitmap.Width}x{bitmap.Height}, bytes={bytes}, "
+        + $"total={totalTimer.Elapsed.TotalMilliseconds:0.0}ms, "
+        + $"process={processMs:0.0}ms, encode={encodeMs:0.0}ms");
+      return outputPath;
+    }
+    catch
+    {
+      TryDeleteTemporaryFile(outputPath);
+      throw;
+    }
+  }
+
+  internal static void ReleaseTemporaryFile(string? path)
+  {
+    if (string.IsNullOrWhiteSpace(path))
+      return;
+    bool tracked;
+    lock (TemporaryFilesLock)
+      tracked = TemporaryFiles.Remove(path);
+    if (tracked)
+      TryDeleteTemporaryFile(path);
+  }
+
+  internal static void CleanupTemporaryFiles()
+  {
+    string[] paths;
+    lock (TemporaryFilesLock)
+    {
+      paths = TemporaryFiles.ToArray();
+      TemporaryFiles.Clear();
+    }
+    foreach (string path in paths)
+      TryDeleteTemporaryFile(path);
+  }
+
+  private static void TryDeleteTemporaryFile(string path)
+  {
+    try
+    {
+      if (File.Exists(path))
+        File.Delete(path);
+    }
+    catch (Exception ex)
+    {
+      Log.Write($"Delete temporary picture file failed for '{path}': {ex.Message}");
+    }
+  }
+
+  private static Size BoundedOutputSize(int width, int height)
+  {
+    if (width <= 0 || height <= 0)
+      throw new ArgumentOutOfRangeException(nameof(width), "Image dimensions must be positive.");
+
+    double pixelScale = Math.Sqrt(MaxProcessedPixels / ((double)width * height));
+    double dimensionScale = Math.Min(
+      MaxProcessedDimension / (double)width,
+      MaxProcessedDimension / (double)height);
+    double scale = Math.Min(1.0, Math.Min(pixelScale, dimensionScale));
+    return new Size(
+      Math.Max(1, (int)Math.Round(width * scale)),
+      Math.Max(1, (int)Math.Round(height * scale)));
   }
 
   private static byte[] ApplyUnsharpMask(byte[] input, int width, int height, int level)
