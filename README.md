@@ -1,4 +1,4 @@
-# vObjectProperties+  ·  v26.9.30.2102
+# vObjectProperties+  ·  v26.10.8.1704
 
 vObjectProperties+ is a Rhino 8 and Rhino 9 plug-in that adds a per-document **Properties+** panel for inspecting and editing object geometry, attributes, annotation, rendering, and display settings.
 

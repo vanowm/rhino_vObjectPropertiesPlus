@@ -46,6 +46,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private readonly DropDown _typeDrop;
   private readonly TextBox _nameBox;
   private readonly DropDown _layerDrop;
+  private readonly Label _groupsLabel;
+  private readonly DropDown _groupsDrop;
   private readonly DropDown _displayColorDrop;
   private readonly Button _displayColorButton;
   private readonly DropDown _displayModeDrop;
@@ -137,6 +139,10 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private System.Windows.Controls.ComboBox? _nativeLayerDrop;
   private Stopwatch? _layerDropOpenTimer;
   private bool _layerDropFirstOpen = true;
+  private sealed record GroupDropItem(Guid Id, int Index, string Name);
+  private List<GroupDropItem> _groupDropItems = new();
+  private Guid _previewGroupId;
+  private uint _groupDropDocSerial;
 
   private enum RectangleHighlightKind
   {
@@ -170,9 +176,11 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private RectangleHighlightKind _rectangleHighlightKind = RectangleHighlightKind.None;
   private readonly FocusHighlightConduit _focusHighlightConduit = new();
   private readonly FocusHighlightConduit _typeDropPreviewConduit = new();
+  private readonly FocusHighlightConduit _groupHighlightConduit = new();
   private System.Windows.Controls.ComboBox? _nativeTypeDrop;
   private int _hoveredTypeDropIndex = -1;
   private bool _focusHighlightSuspendedForTypeDropHover;
+  private bool _groupHighlightSuspendedForTypeDropHover;
   private bool _typeDropInputTracking;
 
   private RhinoDoc? _doc;
@@ -200,6 +208,10 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _typeDrop.DropDownClosed += OnTypeDropClosed;
     _nameBox = NewValueBox();
     _layerDrop = NewReadOnlyDropDown();
+    _groupsLabel = new Label { Text = "Groups", Width = LabelWidth };
+    _groupsDrop = NewReadOnlyDropDown();
+    _groupsDrop.ItemTextBinding = Binding.Property<GroupDropItem, string>(item => item.Name);
+    _groupsDrop.SelectedIndexChanged += OnGroupDropSelectedIndexChanged;
     _displayColorDrop = NewReadOnlyDropDown();
     _displayColorButton = NewActionButton("...");
     _displayModeDrop = NewReadOnlyDropDown();
@@ -389,6 +401,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       {
         NewValueRow("Name", _nameBox),
         NewValueRow("Layer", _layerDrop),
+        NewDynamicValueRow(_groupsLabel, _groupsDrop),
         NewControlWithButtonRow("Display Color", _displayColorDrop, _displayColorButton),
         NewValueRow("Display Mode", _displayModeDrop),
         NewValueRow("Linetype", _linetypeDrop),
@@ -598,6 +611,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
         RhinoDoc.DeselectAllObjects += OnAllObjectsDeselected;
         RhinoDoc.ModifyObjectAttributes += OnObjectAttributesChanged;
         RhinoDoc.LayerTableEvent += OnLayerTableChanged;
+        RhinoDoc.GroupTableEvent += OnGroupTableChanged;
         RhinoDoc.EndOpenDocument += OnDocumentOpened;
         RhinoDoc.DocumentPropertiesChanged += OnDocumentPropertiesChanged;
         Rhino.Commands.Command.EndCommand += OnCommandEnded;
@@ -623,6 +637,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       RhinoDoc.DeselectAllObjects -= OnAllObjectsDeselected;
       RhinoDoc.ModifyObjectAttributes -= OnObjectAttributesChanged;
       RhinoDoc.LayerTableEvent -= OnLayerTableChanged;
+      RhinoDoc.GroupTableEvent -= OnGroupTableChanged;
       RhinoDoc.EndOpenDocument -= OnDocumentOpened;
       RhinoDoc.DocumentPropertiesChanged -= OnDocumentPropertiesChanged;
       Rhino.Commands.Command.EndCommand -= OnCommandEnded;
@@ -630,6 +645,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       DetachLayerDropTimingHandlers();
       DetachTypeDropHoverHandlers();
       ClearTypeDropHoverPreview();
+      ClearGroupHighlight();
       (_nativeTextViewModel as IDisposable)?.Dispose();
       (_nativeDimensionLeaderViewModel as IDisposable)?.Dispose();
       _nativeTextViewModel = null;
@@ -664,6 +680,12 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   {
     _layerDropItemsDirty = true;
     if (ReferenceEquals(_doc, e.Document))
+      RefreshFromDoc(e.Document);
+  }
+
+  private void OnGroupTableChanged(object? sender, Rhino.DocObjects.Tables.GroupTableEventArgs e)
+  {
+    if (_doc?.RuntimeSerialNumber == e.Document.RuntimeSerialNumber)
       RefreshFromDoc(e.Document);
   }
 
@@ -839,7 +861,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       if (focusedSegment != null)
       {
         _focusHighlightConduit.SetSegment(focusedSegment.ParentObject, focusedSegment.Curve);
-        _focusHighlightConduit.Enabled = true;
+        _focusHighlightConduit.Enabled = _previewGroupId == Guid.Empty;
       }
 
       PopulateTypeDropdown(_doc);
@@ -986,6 +1008,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       if (isSameSelectionSet)
       {
         RefreshTrackedSelectionReferences(objectList);
+        UpdateGroupDropdown(doc);
 
         if (isSegmentFocus)
         {
@@ -1118,6 +1141,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _nameBox.Text = CommonOrVaries(objectList, o => SafeString(o.Attributes.Name));
     string layerText = CommonOrVaries(objectList, o => LayerName(doc, o.Attributes.LayerIndex));
     _currentLayerFullPath = layerText;
+    UpdateGroupDropdown(doc);
     long fieldStart = Stopwatch.GetTimestamp();
     SetLayerDropValue(_layerDrop, doc, layerText, _layerExpandedState);
     layersMs = Stopwatch.GetElapsedTime(fieldStart).TotalMilliseconds;
@@ -1474,6 +1498,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _focusedObjectId = Guid.Empty;
     _focusedSegmentIndex = -1;
     _selectedObjectIds.Clear();
+    UpdateGroupDropdown(_doc);
     _nameBox.Text = "";
     SetControlEnabled(_nameBox, false);
     _currentLayerFullPath = "-";
@@ -1899,6 +1924,115 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     return groups != null && groups.Length > 0 ? $"g:{groups[0]}" : $"o:{cluster[0].Id}";
   }
 
+  private void UpdateGroupDropdown(RhinoDoc? doc)
+  {
+    uint docSerial = doc?.RuntimeSerialNumber ?? 0;
+    if (_groupDropDocSerial != docSerial)
+      _previewGroupId = Guid.Empty;
+    _groupDropDocSerial = docSerial;
+
+    var items = new List<GroupDropItem>();
+    if (doc != null)
+    {
+      foreach (int index in _allSelectedObjects
+        .SelectMany(obj => obj.Attributes.GetGroupList() ?? Array.Empty<int>()).Distinct())
+      {
+        if (index < 0 || index >= doc.Groups.Count)
+          continue;
+        var group = doc.Groups[index];
+        if (group == null || group.IsDeleted)
+          continue;
+        string name = group.Name;
+        if (string.IsNullOrWhiteSpace(name))
+          name = $"Group {index + 1}";
+        items.Add(new GroupDropItem(group.Id, index, name));
+      }
+      items = items.OrderBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase)
+        .ThenBy(item => item.Index).ToList();
+    }
+
+    bool hasGroups = items.Count > 0;
+    if (hasGroups)
+      items.Insert(0, new GroupDropItem(Guid.Empty, -1, "All"));
+    int selectedIndex = items.FindIndex(item => item.Id == _previewGroupId);
+    if (selectedIndex < 0)
+    {
+      _previewGroupId = Guid.Empty;
+      selectedIndex = hasGroups ? 0 : -1;
+    }
+
+    bool wasUpdatingUi = _isUpdatingUi;
+    _isUpdatingUi = true;
+    try
+    {
+      if (!_groupDropItems.SequenceEqual(items))
+      {
+        _groupDropItems = items;
+        _groupsDrop.DataStore = items;
+      }
+      if (_groupsDrop.SelectedIndex != selectedIndex)
+        _groupsDrop.SelectedIndex = selectedIndex;
+      _groupsLabel.Visible = hasGroups;
+      _groupsDrop.Visible = hasGroups;
+      SetControlEnabled(_groupsDrop, hasGroups);
+    }
+    finally
+    {
+      _isUpdatingUi = wasUpdatingUi;
+    }
+    UpdateGroupHighlight();
+  }
+
+  private void OnGroupDropSelectedIndexChanged(object? sender, EventArgs e)
+  {
+    if (_isUpdatingUi)
+      return;
+    int index = _groupsDrop.SelectedIndex;
+    _previewGroupId = index >= 0 && index < _groupDropItems.Count
+      ? _groupDropItems[index].Id : Guid.Empty;
+    UpdateGroupHighlight();
+  }
+
+  private void UpdateGroupHighlight()
+  {
+    var group = _groupDropItems.FirstOrDefault(item => item.Id == _previewGroupId && item.Index >= 0);
+    var members = new List<RhinoObject>();
+    if (_doc != null && group != null)
+    {
+      // Intersect with the saved drawing selection, never the whole Rhino group.
+      foreach (var selected in _allSelectedObjects)
+      {
+        var obj = _doc.Objects.FindId(selected.Id);
+        if (obj != null && !obj.IsDeleted && obj.IsSelected(true) > 0
+          && obj.Attributes.GetGroupList()?.Contains(group.Index) == true)
+          members.Add(obj);
+      }
+    }
+
+    bool wasHighlighting = _groupHighlightConduit.Enabled;
+    bool wasObjectHighlighting = _focusHighlightConduit.Enabled;
+    if (_doc != null)
+      _groupHighlightConduit.SetSelectedObjects(_doc, members);
+    else
+      _groupHighlightConduit.Clear();
+    _groupHighlightConduit.Enabled = members.Count > 0 && !_groupHighlightSuspendedForTypeDropHover;
+    _focusHighlightConduit.Enabled = group == null && _focusedObjectId != Guid.Empty
+      && !_focusHighlightSuspendedForTypeDropHover;
+    if (wasHighlighting || _groupHighlightConduit.Enabled
+      || wasObjectHighlighting != _focusHighlightConduit.Enabled)
+      _doc?.Views.Redraw();
+  }
+
+  private void ClearGroupHighlight()
+  {
+    bool wasHighlighting = _groupHighlightConduit.Enabled;
+    _groupHighlightConduit.Clear();
+    _groupHighlightConduit.Enabled = false;
+    _groupHighlightSuspendedForTypeDropHover = false;
+    if (wasHighlighting)
+      _doc?.Views.Redraw();
+  }
+
   private static string BuildObjectDropLabel(RhinoObject obj, RhinoDoc? doc)
   {
     string type = BuildTypeText(new[] { obj });
@@ -2153,6 +2287,11 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       _focusHighlightConduit.Enabled = false;
       _focusHighlightSuspendedForTypeDropHover = true;
     }
+    if (!_groupHighlightSuspendedForTypeDropHover && _groupHighlightConduit.Enabled)
+    {
+      _groupHighlightConduit.Enabled = false;
+      _groupHighlightSuspendedForTypeDropHover = true;
+    }
 
     if (selectionItem.IsSegment)
     {
@@ -2174,15 +2313,21 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
   private void ClearTypeDropHoverPreview()
   {
-    bool redraw = _typeDropPreviewConduit.Enabled || _focusHighlightSuspendedForTypeDropHover;
+    bool redraw = _typeDropPreviewConduit.Enabled || _focusHighlightSuspendedForTypeDropHover
+      || _groupHighlightSuspendedForTypeDropHover;
     _typeDropPreviewConduit.Clear();
     _typeDropPreviewConduit.Enabled = false;
     _hoveredTypeDropIndex = -1;
 
     if (_focusHighlightSuspendedForTypeDropHover)
     {
-      _focusHighlightConduit.Enabled = _focusedObjectId != Guid.Empty;
+      _focusHighlightConduit.Enabled = _focusedObjectId != Guid.Empty && _previewGroupId == Guid.Empty;
       _focusHighlightSuspendedForTypeDropHover = false;
+    }
+    if (_groupHighlightSuspendedForTypeDropHover)
+    {
+      _groupHighlightConduit.Enabled = _previewGroupId != Guid.Empty;
+      _groupHighlightSuspendedForTypeDropHover = false;
     }
 
     if (redraw)
@@ -2193,6 +2338,9 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   {
     if (_isUpdatingUi)
       return;
+
+    if (_previewGroupId != Guid.Empty)
+      _groupsDrop.SelectedIndex = 0;
 
     int idx = _typeDrop.SelectedIndex;
     if (idx <= 0 || _doc == null)
@@ -5385,25 +5533,38 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
     private RhinoObject? _obj;
     private Curve? _segmentCurve;
+    private IReadOnlyList<RhinoObject> _selectedObjects = Array.Empty<RhinoObject>();
+    private uint _selectedObjectsDocSerial;
     private readonly Rhino.Display.DisplayMaterial _surfaceHighlightMaterial =
       new(HighlightColor, 0.15);
 
     public void SetObject(RhinoObject obj) 
     {
+      Clear();
       _obj = obj;
       _segmentCurve = null;
     }
     
     public void SetSegment(RhinoObject obj, Curve segmentCurve)
     {
+      Clear();
       _obj = obj;
       _segmentCurve = segmentCurve;
+    }
+
+    public void SetSelectedObjects(RhinoDoc doc, IEnumerable<RhinoObject> objects)
+    {
+      Clear();
+      _selectedObjects = objects.ToArray();
+      _selectedObjectsDocSerial = doc.RuntimeSerialNumber;
     }
     
     public void Clear() 
     {
       _obj = null;
       _segmentCurve = null;
+      _selectedObjects = Array.Empty<RhinoObject>();
+      _selectedObjectsDocSerial = 0;
     }
 
     protected override void DrawOverlay(DrawEventArgs e)
@@ -5417,17 +5578,31 @@ public sealed class vObjectPropertiesPlusPanel : Panel
         return;
       }
       
-      if (_obj?.Geometry == null)
+      if (_obj != null)
+        DrawObject(e, _obj);
+      if (_selectedObjectsDocSerial != e.RhinoDoc?.RuntimeSerialNumber)
+        return;
+      foreach (var obj in _selectedObjects)
+      {
+        if (!obj.IsDeleted && !obj.IsHidden && obj.IsSelected(true) > 0)
+          DrawObject(e, obj);
+      }
+    }
+
+    private void DrawObject(DrawEventArgs e, RhinoObject obj)
+    {
+      if (obj.Geometry == null)
         return;
 
       var color2 = HighlightColor;
-      switch (_obj.Geometry)
+      switch (obj.Geometry)
       {
         case Curve crv:
           e.Display.DrawCurve(crv, color2, 3);
           break;
         case Rhino.Geometry.Brep brep:
-          e.Display.DrawBrepShaded(brep, _surfaceHighlightMaterial);
+          if (!obj.IsPictureFrame)
+            e.Display.DrawBrepShaded(brep, _surfaceHighlightMaterial);
           e.Display.DrawBrepWires(brep, color2, 2);
           break;
         case Rhino.Geometry.Extrusion ext:
@@ -5456,7 +5631,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
           e.Display.DrawAnnotation(annotation, color2);
           break;
         default:
-          var bb = _obj.Geometry.GetBoundingBox(false);
+          var bb = obj.Geometry.GetBoundingBox(false);
           if (bb.IsValid)
             e.Display.DrawBox(new Rhino.Geometry.Box(bb), color2, 2);
           break;
