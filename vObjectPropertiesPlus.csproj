@@ -4,17 +4,19 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <RhinoHostMajor Condition="'$(RhinoHostMajor)' == '' and '$(TargetFramework)' == 'net7.0-windows'">8</RhinoHostMajor>
+    <RhinoHostMajor Condition="'$(RhinoHostMajor)' == '' and '$(TargetFramework)' == 'net10.0-windows'">9</RhinoHostMajor>
     <AssemblyName>vObjectPropertiesPlus</AssemblyName>
     <Product>vObjectProperties+</Product>
     <Title>vObjectProperties+</Title>
     <RootNamespace>vObjectPropertiesPlus</RootNamespace>
     <LangVersion>latest</LangVersion>
     <BuildInParallel>false</BuildInParallel>
-    <ReleaseDllPaths>bin/Release/net7.0-windows/vObjectPropertiesPlus.dll;bin/Release/net10.0-windows/vObjectPropertiesPlus.dll</ReleaseDllPaths>
+    <ReleaseDllPaths>bin/Release/Rhino8/net7.0-windows/vObjectPropertiesPlus.dll;bin/Release/Rhino9/net10.0-windows/vObjectPropertiesPlus.dll</ReleaseDllPaths>
     <Rhino9SystemDirectory Condition="Exists('$(ProgramFiles)\Rhino 9\System\RhinoCommon.dll')">$(ProgramFiles)\Rhino 9\System</Rhino9SystemDirectory>
     <Rhino9SystemDirectory Condition="'$(Rhino9SystemDirectory)' == '' and Exists('$(ProgramFiles)\Rhino 9 WIP\System\RhinoCommon.dll')">$(ProgramFiles)\Rhino 9 WIP\System</Rhino9SystemDirectory>
-    <RhinoSystemDirectory Condition="'$(TargetFramework)' == 'net7.0-windows'">$(ProgramFiles)\Rhino 8\System</RhinoSystemDirectory>
-    <RhinoSystemDirectory Condition="'$(TargetFramework)' == 'net10.0-windows'">$(Rhino9SystemDirectory)</RhinoSystemDirectory>
+    <RhinoSystemDirectory Condition="'$(RhinoHostMajor)' == '8'">$(ProgramFiles)\Rhino 8\System</RhinoSystemDirectory>
+    <RhinoSystemDirectory Condition="'$(RhinoHostMajor)' == '9'">$(Rhino9SystemDirectory)</RhinoSystemDirectory>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -57,6 +59,18 @@
     <EmbeddedResource Include="..\icons\rhino_svgs\Display_Display_Panel.svg">
       <LogicalName>vObjectPropertiesPlus.Icons.Display_Display_Panel.svg</LogicalName>
     </EmbeddedResource>
+    <EmbeddedResource Include="..\icons\rhino_svgs\File_Standard_New_file.svg">
+      <LogicalName>vObjectPropertiesPlus.Icons.New.svg</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\icons\rhino_svgs\Cancel.svg">
+      <LogicalName>vObjectPropertiesPlus.Icons.Delete.svg</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\icons\rhino_svgs\EditText.svg">
+      <LogicalName>vObjectPropertiesPlus.Icons.Edit.svg</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\icons\rhino_svgs\SelectByValue.svg">
+      <LogicalName>vObjectPropertiesPlus.Icons.SelSame.svg</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
   <Target Name="CompileWin32Resources" BeforeTargets="CoreCompile">
@@ -95,18 +109,14 @@
     <ReadLinesFromFile File="$(ProjectDir)Resources\vObjectPropertiesPlus.rc">
       <Output TaskParameter="Lines" ItemName="RcSourceLines" />
     </ReadLinesFromFile>
-    <WriteLinesToFile
-      File="$(GeneratedRcFile)"
-      Lines="@(RcSourceLines);@(RcVersionLines)"
-      Overwrite="true"
-      Encoding="UTF-8" />
+    <WriteLinesToFile File="$(GeneratedRcFile)" Lines="@(RcSourceLines);@(RcVersionLines)" Overwrite="true" Encoding="UTF-8" />
     <Exec
-      Command="powershell -NoProfile -ExecutionPolicy Bypass -Command &quot;$root=Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFilesX86)) 'Windows Kits\10\bin'; $rc=Get-ChildItem -LiteralPath $root -Recurse -File -Filter 'rc.exe' | Where-Object { $_.Directory.Name -eq 'x64' } | Sort-Object FullName -Descending | Select-Object -First 1; if (-not $rc) { Write-Error 'Windows SDK rc.exe was not found.'; exit 1 }; &amp; $rc.FullName /nologo /fo '$(MSBuildProjectDirectory)\$(IntermediateOutputPath)vObjectPropertiesPlus.res' '$(MSBuildProjectDirectory)\$(GeneratedRcFile)'; exit $LASTEXITCODE&quot;"
-      WorkingDirectory="$(ProjectDir)Resources" />
+      Command="powershell -NoProfile -ExecutionPolicy Bypass -Command &quot;$root=Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFilesX86)) 'Windows Kits\10\bin'; $rc=Get-ChildItem -LiteralPath $root -Recurse -File -Filter 'rc.exe' | Where-Object { $_.Directory.Name -eq 'x64' } | Sort-Object FullName -Descending | Select-Object -First 1; if (-not $rc) { Write-Error 'Windows SDK rc.exe was not found.'; exit 1 }; &amp; $rc.FullName /nologo /fo '$(MSBuildProjectDirectory)\$(IntermediateOutputPath)vObjectPropertiesPlus.res' '$(MSBuildProjectDirectory)\$(GeneratedRcFile)'; exit $LASTEXITCODE&quot;" WorkingDirectory="$(ProjectDir)Resources" />
   </Target>
 
   <Target Name="ValidateRhinoReferences" BeforeTargets="ResolveReferences" Condition="'$(TargetFramework)' != '' and !Exists('$(RhinoSystemDirectory)\RhinoCommon.dll')">
     <Error Text="$(TargetFramework) requires its matching Rhino installation; RhinoCommon.dll was not found under '$(RhinoSystemDirectory)'." />
   </Target>
+  <Import Project="Host.Build.targets" />
   <Import Project="Build.Release.targets" />
 </Project>

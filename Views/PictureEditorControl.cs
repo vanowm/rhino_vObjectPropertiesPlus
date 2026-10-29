@@ -2648,7 +2648,7 @@ internal sealed class PictureEditorControl : Panel
     return new Bitmap(stream.ToArray());
   }
 
-  private static Bitmap CreateResetIcon(bool enabled)
+  internal static Bitmap CreateResetIcon(bool enabled)
   {
     using var systemBitmap = new System.Drawing.Bitmap(16, 16,
       System.Drawing.Imaging.PixelFormat.Format32bppArgb);

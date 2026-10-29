@@ -42,6 +42,10 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private const string AttributeEditorHeightKey = "Panel.AttributeEditorHeight";
   private const string TextEditorHeightKey = "Panel.TextEditorHeight";
   private const string NativeTextEditorHeightKey = "Panel.NativeTextEditorHeight";
+  private const string PartDataSectionCollapsedKey = "Panel.PartDataSectionCollapsed";
+  private const string PartDataEditorHeightKey = "Panel.PartDataEditorHeight";
+  private const string NestTablesSectionCollapsedKey = "Panel.NestTablesSectionCollapsed";
+  private const string NestTablesEditorHeightKey = "Panel.NestTablesEditorHeight";
 
   private readonly DropDown _typeDrop;
   private readonly TextBox _nameBox;
@@ -68,6 +72,12 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private readonly CheckBox _showIsocurveCheck;
 
   private readonly PictureEditorControl _pictureEditor;
+  private readonly PartDataEditorControl _partDataEditor;
+  private readonly NestTableSummaryControl _nestTableSummary;
+  private readonly Panel _partDataSection;
+  private readonly Panel _nestTablesSection;
+  private bool _partDataSectionCollapsed = true;
+  private bool _nestTablesSectionCollapsed;
 
   private readonly TextBox _totalLengthBox;
   private readonly Label _totalLengthNameLabel;
@@ -116,6 +126,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
   private readonly Button _matchButton;
   private readonly Button _detailsButton;
+  private readonly Button _selSameButton;
   private readonly Rhino.UI.ObjectProperties.UserStringsPanelControl _attributePanel;
   private readonly Control? _nativeTextPanel;
   private object? _nativeTextViewModel;
@@ -234,6 +245,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _pictureEditor = new PictureEditorControl(
       () => _doc,
       () => SelectedRhinoObjects().ToList());
+    _partDataEditor = new PartDataEditorControl(LoadPersistedEditorHeight(PartDataEditorHeightKey, 260, 120), LoadUiIcon);
+    _nestTableSummary = new NestTableSummaryControl(LoadPersistedEditorHeight(NestTablesEditorHeightKey, 120, 70));
 
     SetButtonIcon(_displayColorButton, "Layer");
     SetButtonIcon(_printColorButton, "Display_Display_Panel");
@@ -379,6 +392,9 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
     _detailsButton = new Button { Text = "Details" };
     _detailsButton.Click += (_, _) => RunDetails();
+    _selSameButton = new Button { ToolTip = "Select same (vSelSame)", Width = 26, Height = 24, Visible = IsSelSameAvailable() };
+    SetButtonIcon(_selSameButton, "SelSame");
+    _selSameButton.Click += (_, _) => RunSelSame();
 
     _layerDrop.ItemTextBinding = Binding.Property<LayerDropItem, string>(i => i.DisplayText);
     _layerDrop.ItemImageBinding = Binding.Property<LayerDropItem, Image>(i => i.Swatch);
@@ -534,6 +550,25 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     var generalSection = CreateFlatSection("General", generalTable,
       () => _generalSectionCollapsed,
       value => SetSectionCollapsed(GeneralSectionCollapsedKey, ref _generalSectionCollapsed, value));
+    _partDataSection = CreateFlatSection("Part Data", _partDataEditor,
+      () => _partDataSectionCollapsed,
+      value =>
+      {
+        SetSectionCollapsed(PartDataSectionCollapsedKey, ref _partDataSectionCollapsed, value);
+        _partDataEditor.SetActive(!value);
+      }, _partDataEditor.ResizeTarget, _partDataEditor.ResizeTarget, PartDataEditorHeightKey, 120);
+    _partDataSection.Visible = false;
+    _partDataEditor.TargetsChanged += (_, _) => _partDataSection.Visible = _partDataEditor.HasParts;
+    _nestTablesSection = CreateFlatSection("Nest Tables", _nestTableSummary,
+      () => _nestTablesSectionCollapsed,
+      value =>
+      {
+        SetSectionCollapsed(NestTablesSectionCollapsedKey, ref _nestTablesSectionCollapsed, value);
+        _nestTableSummary.SetActive(!value);
+      },
+      _nestTableSummary.ResizeTarget, _nestTableSummary.ResizeTarget, NestTablesEditorHeightKey, 70);
+    _nestTablesSection.Visible = false;
+    _nestTableSummary.TablesChanged += (_, _) => _nestTablesSection.Visible = _nestTableSummary.HasTables;
     _attributesSection = CreateFlatSection("Attribute User Text", attributeEditorRow,
       () => _attributesSectionCollapsed,
       value => SetSectionCollapsed(AttributesSectionCollapsedKey, ref _attributesSectionCollapsed, value),
@@ -568,6 +603,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
         typeTable,
         _infoPlusSection,
         generalSection,
+        _partDataSection,
+        _nestTablesSection,
         _pictureSection,
         _textSection,
         _nativeTextPanelHost,
@@ -584,7 +621,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
           Items =
           {
             new StackLayoutItem(_matchButton, true),
-            new StackLayoutItem(_detailsButton, true)
+            new StackLayoutItem(_detailsButton, true),
+            _selSameButton
           }
         }
       }
@@ -618,6 +656,10 @@ public sealed class vObjectPropertiesPlusPanel : Panel
         _layerDropItemsDirty = true;
       }
       _pictureEditor.Start();
+      _partDataEditor.Start();
+      _partDataEditor.SetActive(!_partDataSectionCollapsed);
+      _nestTableSummary.Start();
+      _nestTableSummary.SetActive(!_nestTablesSectionCollapsed);
       Application.Instance.AsyncInvoke(() =>
       {
         if (!_panelLoaded)
@@ -651,6 +693,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       _nativeTextViewModel = null;
       _nativeDimensionLeaderViewModel = null;
       _pictureEditor.Stop();
+      _partDataEditor.Stop();
+      _nestTableSummary.Stop();
     };
     SetEmptyState();
   }
@@ -739,6 +783,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
   private void OnCommandEnded(object? sender, CommandEventArgs e)
   {
+    _selSameButton.Visible = IsSelSameAvailable();
+    _selSameButton.Enabled = _selSameButton.Visible && _allSelectedObjects.Count > 0;
     if (_deferredCommandRefreshDoc == null)
       return;
 
@@ -986,6 +1032,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     bool hasSelection = objectList.Count > 0;
     _matchButton.Enabled = hasSelection;
     _detailsButton.Enabled = hasSelection;
+    _selSameButton.Visible = IsSelSameAvailable();
+    _selSameButton.Enabled = hasSelection && _selSameButton.Visible;
 
     // When called with the full selection (not a focused-object drill-down), save it.
     // A full-selection call always comes in with all _selectedObjectIds matching the new list,
@@ -1009,6 +1057,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       {
         RefreshTrackedSelectionReferences(objectList);
         UpdateGroupDropdown(doc);
+        UpdatePartSections(doc, objectList.Where(obj => obj.Id == _focusedObjectId).ToList());
 
         if (isSegmentFocus)
         {
@@ -1142,6 +1191,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     string layerText = CommonOrVaries(objectList, o => LayerName(doc, o.Attributes.LayerIndex));
     _currentLayerFullPath = layerText;
     UpdateGroupDropdown(doc);
+    UpdatePartSections(doc, objectList);
     long fieldStart = Stopwatch.GetTimestamp();
     SetLayerDropValue(_layerDrop, doc, layerText, _layerExpandedState);
     layersMs = Stopwatch.GetElapsedTime(fieldStart).TotalMilliseconds;
@@ -1499,6 +1549,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _focusedSegmentIndex = -1;
     _selectedObjectIds.Clear();
     UpdateGroupDropdown(_doc);
+    UpdatePartSections(_doc, Array.Empty<RhinoObject>());
     _nameBox.Text = "";
     SetControlEnabled(_nameBox, false);
     _currentLayerFullPath = "-";
@@ -1605,6 +1656,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     
     _matchButton.Enabled = false;
     _detailsButton.Enabled = false;
+    _selSameButton.Visible = IsSelSameAvailable();
+    _selSameButton.Enabled = false;
   }
 
   private void EnsureSegmentReadOnlyInfoBoxesAreSelectable(bool hasSegmentSelection)
@@ -1952,7 +2005,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     }
 
     bool hasGroups = items.Count > 0;
-    if (hasGroups)
+    if (items.Count > 1)
       items.Insert(0, new GroupDropItem(Guid.Empty, -1, "All"));
     int selectedIndex = items.FindIndex(item => item.Id == _previewGroupId);
     if (selectedIndex < 0)
@@ -2731,6 +2784,12 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _attributePanel.InitializeControls(selectedObjects);
   }
 
+  private void UpdatePartSections(RhinoDoc? doc, IReadOnlyList<RhinoObject> objects)
+  {
+    _partDataEditor.Update(doc, objects);
+    _nestTableSummary.Update(doc, objects);
+  }
+
   private void UpdatePictureSection(IReadOnlyList<RhinoObject> objects)
   {
     var pictureObjects = objects
@@ -2768,6 +2827,20 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _doc.Views.Redraw();
 
     RhinoApp.RunScript("_What", false);
+  }
+
+  private static bool IsSelSameAvailable()
+  {
+    var info = Rhino.PlugIns.PlugIn.GetPlugInInfo(new Guid("2607512e-a1fc-4cf9-9329-a293431437a0"));
+    return info != null && (info.IsLoaded || !info.IsLoadProtected(out _))
+      && Rhino.Commands.Command.LookupCommandId("vSelSame", true) != Guid.Empty;
+  }
+
+  private void RunSelSame()
+  {
+    _selSameButton.Visible = IsSelSameAvailable();
+    if (_doc == null || RhinoApp.InCommand > 0 || !_selSameButton.Visible) return;
+    RhinoApp.RunScript("_vSelSame", false);
   }
 
   private void ApplyAttributes(Action<ObjectAttributes> update)
@@ -5606,13 +5679,15 @@ public sealed class vObjectPropertiesPlusPanel : Panel
           e.Display.DrawBrepWires(brep, color2, 2);
           break;
         case Rhino.Geometry.Extrusion ext:
-          var extBrep = ext.ToBrep(true);
+        {
+          using var extBrep = ext.ToBrep(true);
           if (extBrep != null)
           {
             e.Display.DrawBrepShaded(extBrep, _surfaceHighlightMaterial);
             e.Display.DrawBrepWires(extBrep, color2, 2);
           }
           break;
+        }
         case Rhino.Geometry.Mesh mesh:
           e.Display.DrawMeshShaded(mesh, _surfaceHighlightMaterial);
           e.Display.DrawMeshWires(mesh, color2, 2);
@@ -6371,6 +6446,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       _meshSectionCollapsed = settings.GetBool(MeshSectionCollapsedKey, false);
       _renderingSectionCollapsed = settings.GetBool(RenderingSectionCollapsedKey, false);
       _isocurveSectionCollapsed = settings.GetBool(IsocurveSectionCollapsedKey, false);
+      _partDataSectionCollapsed = settings.GetBool(PartDataSectionCollapsedKey, true);
+      _nestTablesSectionCollapsed = settings.GetBool(NestTablesSectionCollapsedKey, false);
     }
     catch (Exception ex)
     {
