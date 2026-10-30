@@ -210,6 +210,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private bool _textHeightUserEditing;
   private bool _textContentUserEditing;
   private bool _textContentDirty;
+  private string _textContentBaseline = string.Empty;
+  private bool _textContentMixed;
   private long _lastUserEditMs;
   private uint _unitPrefsLoadedDocSerial;
 
@@ -374,7 +376,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _textItalicBtn.Click += (_, _) => { if (!_isUpdatingUi) ApplyTextItalic(); };
     _textUnderlineBtn.Click += (_, _) => { if (!_isUpdatingUi) ApplyTextUnderline(); };
     _textContentTimer.Elapsed += (_, _) => { _textContentTimer.Stop(); ApplyTextContent(); };
-    _textContentArea.GotFocus += (_, _) => _textContentUserEditing = true;
+    _textContentArea.GotFocus += (_, _) => OnTextContentGotFocus();
     _textContentArea.LostFocus += (_, _) => OnTextContentLostFocus();
     _textContentArea.TextChanged += (_, _) => OnTextContentChanged();
 
@@ -883,6 +885,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _textContentTimer.Stop();
     _textContentUserEditing = false;
     _textContentDirty = false;
+    _textContentBaseline = string.Empty;
+    _textContentMixed = false;
   }
 
   private void RefreshForSegmentSelection(List<CurveInfo> segments, int focusedSegmentIndex = -1)
@@ -2406,6 +2410,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       // Restore full selection view.
       if (_focusedObjectId != Guid.Empty || _focusedSegmentIndex >= 0)
       {
+        ResetTextContentEditState();
         _focusedObjectId = Guid.Empty;
         _focusedSegmentIndex = -1;
         _selectedObjectIds.Clear();
@@ -2427,6 +2432,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     }
 
     var selectionItem = _typeDropMap[idx]!;
+    ResetTextContentEditState();
     
     if (selectionItem.IsSegment)
     {
@@ -7010,7 +7016,11 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       _nativeDimensionLeaderViewModel = null;
     }
     _textSection.Visible = hasText && !useNativeTextPanel && !useNativeDimensionLeaderPanel;
-    if (!hasText || useNativeTextPanel || useNativeDimensionLeaderPanel) return;
+    if (!hasText || useNativeTextPanel || useNativeDimensionLeaderPanel)
+    {
+      ResetTextContentEditState();
+      return;
+    }
 
     bool prevUpdatingUi = _isUpdatingUi;
     _isUpdatingUi = true;
@@ -7109,18 +7119,29 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       var ts = (tb ? FontStyle.Bold : FontStyle.None) | (ti ? FontStyle.Italic : FontStyle.None);
       _textContentArea.Font = new Eto.Drawing.Font(tf, 9f, ts, tu ? FontDecoration.Underline : FontDecoration.None);
 
-      var contents = textGeometries.Select(TextRelatedContent).Distinct().ToList();
-      string contentText = contents.Count == 1 ? contents[0] : "";
-      if (TextContentEquivalent(_textContentArea.Text ?? "", contentText))
-        _textContentDirty = false;
-
-      if (!_textContentDirty || !_textContentUserEditing)
-        SetTextAreaTextPreservingSelection(_textContentArea, contentText);
+      UpdateTextContentValue(textGeometries);
     }
     finally
     {
       _isUpdatingUi = prevUpdatingUi;
     }
+  }
+
+  private void UpdateTextContentValue(IReadOnlyList<GeometryBase> textGeometries)
+  {
+    var contents = textGeometries.Select(geometry => NormalizeTextLineEndings(TextRelatedContent(geometry)))
+      .Distinct(StringComparer.Ordinal).ToList();
+    string contentText = contents.Count == 1 ? contents[0] : VariesText;
+    if (TextContentEquivalent(_textContentArea.Text ?? "", contentText))
+      _textContentDirty = false;
+    if (_textContentDirty && _textContentUserEditing)
+      return;
+
+    _textContentBaseline = contentText;
+    _textContentMixed = contents.Count > 1;
+    _textContentDirty = false;
+    _textContentTimer.Stop();
+    SetTextAreaTextPreservingSelection(_textContentArea, contentText);
   }
 
   private static void SetTextAreaTextPreservingSelection(TextArea textArea, string text)
@@ -7146,15 +7167,25 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     textArea.CaretIndex = Math.Min(Math.Max(oldCaret, 0), maxIndex);
   }
 
+  private void OnTextContentGotFocus()
+  {
+    _textContentUserEditing = true;
+    if (_textContentMixed && TextContentEquivalent(_textContentArea.Text ?? "", _textContentBaseline))
+      _textContentArea.SelectAll();
+  }
+
   private void OnTextContentChanged()
   {
     if (_isUpdatingUi)
       return;
 
+    _textContentDirty = !TextContentEquivalent(_textContentArea.Text ?? "", _textContentBaseline);
+    _textContentTimer.Stop();
+    if (!_textContentDirty)
+      return;
+
     _lastUserEditMs = System.Environment.TickCount64;
     _textContentUserEditing = true;
-    _textContentDirty = true;
-    _textContentTimer.Stop();
     _textContentTimer.Start();
   }
 
@@ -7282,9 +7313,18 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
   private void ApplyTextContent()
   {
-    if (_isUpdatingUi || _doc == null) return;
+    if (_isUpdatingUi || _doc == null || !_textContentDirty || !_textSection.Visible) return;
     string content = _textContentArea.Text ?? "";
-    ApplyToTextRelatedObjects(IsTextRelatedGeometry,
+    if (TextContentEquivalent(content, _textContentBaseline))
+    {
+      _textContentDirty = false;
+      return;
+    }
+    ApplyToTextRelatedObjects(geometry => IsTextRelatedGeometry(geometry)
+        && !TextContentEquivalent(TextRelatedContent(geometry), content),
       geometry => SetTextRelatedContent(geometry, content), refresh: false);
+    _textContentBaseline = content;
+    _textContentMixed = false;
+    _textContentDirty = false;
   }
 }
