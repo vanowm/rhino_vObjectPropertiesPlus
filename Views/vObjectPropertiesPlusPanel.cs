@@ -128,6 +128,9 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private readonly Button _detailsButton;
   private readonly Button _selSameButton;
   private readonly Rhino.UI.ObjectProperties.UserStringsPanelControl _attributePanel;
+  private System.Windows.FrameworkElement? _nativeAttributesSection;
+  private bool _attributePointerFocusPending;
+  private int _attributePointerFocusGeneration;
   private readonly Control? _nativeTextPanel;
   private object? _nativeTextViewModel;
   private readonly Panel _nativeDimensionLeaderPanelHost;
@@ -603,13 +606,13 @@ public sealed class vObjectPropertiesPlusPanel : Panel
         typeTable,
         _infoPlusSection,
         generalSection,
-        _partDataSection,
-        _nestTablesSection,
-        _pictureSection,
         _textSection,
         _nativeTextPanelHost,
         _nativeDimensionLeaderPanelHost,
         _attributesSection,
+        _partDataSection,
+        _nestTablesSection,
+        _pictureSection,
         _meshSection,
         _renderingSection,
         _isocurveSection,
@@ -665,6 +668,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
         if (!_panelLoaded)
           return;
         ConfigurePanelScroller(panelScrollable);
+        ConfigureAttributeScrollBoundary();
         ConfigureLayerDropVirtualization(_layerDrop);
         InstallTypeDropHoverHandlers();
       });
@@ -684,6 +688,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       RhinoDoc.DocumentPropertiesChanged -= OnDocumentPropertiesChanged;
       Rhino.Commands.Command.EndCommand -= OnCommandEnded;
       _deferredCommandRefreshDoc = null;
+      DetachAttributeScrollBoundary();
       DetachLayerDropTimingHandlers();
       DetachTypeDropHoverHandlers();
       ClearTypeDropHoverPreview();
@@ -6082,6 +6087,66 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
     native.HorizontalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Disabled;
     native.VerticalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Auto;
+  }
+
+  private void ConfigureAttributeScrollBoundary()
+  {
+    try
+    {
+      var native = _attributesSection.ControlObject as System.Windows.FrameworkElement;
+      if (ReferenceEquals(_nativeAttributesSection, native))
+        return;
+      DetachAttributeScrollBoundary();
+      _nativeAttributesSection = native;
+      if (native == null)
+        return;
+      native.PreviewMouseDown += OnAttributePointerFocus;
+      native.PreviewKeyDown += OnAttributeKeyboardFocus;
+      native.RequestBringIntoView += OnAttributeBringIntoView;
+    }
+    catch (Exception ex)
+    {
+      Log.Write($"ConfigureAttributeScrollBoundary failed: {ex.Message}");
+    }
+  }
+
+  private void OnAttributePointerFocus(object sender, System.Windows.Input.MouseButtonEventArgs e)
+  {
+    _attributePointerFocusPending = true;
+    int generation = ++_attributePointerFocusGeneration;
+    _nativeAttributesSection?.Dispatcher.BeginInvoke(
+      System.Windows.Threading.DispatcherPriority.ContextIdle,
+      new Action(() =>
+      {
+        if (generation == _attributePointerFocusGeneration)
+          _attributePointerFocusPending = false;
+      }));
+  }
+
+  private void OnAttributeKeyboardFocus(object sender, System.Windows.Input.KeyEventArgs e)
+  {
+    _attributePointerFocusPending = false;
+    ++_attributePointerFocusGeneration;
+  }
+
+  private void OnAttributeBringIntoView(object sender, System.Windows.RequestBringIntoViewEventArgs e)
+  {
+    // Inner list scrolling has already handled its own requests before they reach this boundary.
+    if (_attributePointerFocusPending)
+      e.Handled = true;
+  }
+
+  private void DetachAttributeScrollBoundary()
+  {
+    if (_nativeAttributesSection != null)
+    {
+      _nativeAttributesSection.PreviewMouseDown -= OnAttributePointerFocus;
+      _nativeAttributesSection.PreviewKeyDown -= OnAttributeKeyboardFocus;
+      _nativeAttributesSection.RequestBringIntoView -= OnAttributeBringIntoView;
+      _nativeAttributesSection = null;
+    }
+    _attributePointerFocusPending = false;
+    ++_attributePointerFocusGeneration;
   }
 
   private void ConfigureLayerDropVirtualization(DropDown dropDown)
