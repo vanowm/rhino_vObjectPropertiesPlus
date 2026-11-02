@@ -214,6 +214,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private bool _textContentMixed;
   private long _lastUserEditMs;
   private uint _unitPrefsLoadedDocSerial;
+  private string _infoPrecisionFormat = "decimal";
 
   public vObjectPropertiesPlusPanel()
   {
@@ -5031,7 +5032,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
   private string GetSelectedPrecisionKindToken()
   {
-    if (AnyDisplayedUnitDropIsFeetAndInches())
+    if (GetSelectedFormatToken() == "fractional" && AnyDisplayedUnitDropIsFeetAndInches())
       return "feet";
 
     return GetSelectedFormatToken();
@@ -5039,17 +5040,45 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
   private void RefreshPrecisionDropOptions()
   {
-    int selectedBits = GetSelectedPrecision(_doc?.ModelDistanceDisplayPrecision ?? 3, 8);
+    string format = GetSelectedFormatToken();
+    int fallback = _doc?.ModelDistanceDisplayPrecision ?? 3;
+    int selectedBits = format == _infoPrecisionFormat
+      ? GetSelectedPrecision(fallback, 8)
+      : ReadInfoPrecisionPreference(_doc, format, fallback);
     bool wasUpdating = _isUpdatingUi;
     _isUpdatingUi = true;
     try
     {
       SetPrecisionDropOptions(_infoPrecisionDrop, GetSelectedPrecisionKindToken(), selectedBits);
+      _infoPrecisionFormat = format;
     }
     finally
     {
       _isUpdatingUi = wasUpdating;
     }
+  }
+
+  private static string InfoPrecisionPreferenceKey(string format)
+  {
+    return format.Equals("fractional", StringComparison.OrdinalIgnoreCase)
+      ? "Precision.Fractional" : "Precision.Decimal";
+  }
+
+  private static int ReadInfoPrecisionPreference(RhinoDoc? doc, string format, int fallback)
+  {
+    string? saved = doc == null ? null : GetDocUnitPref(doc, InfoPrecisionPreferenceKey(format));
+    return Math.Max(0, Math.Min(8,
+      int.TryParse(saved, NumberStyles.Integer, CultureInfo.InvariantCulture, out int precision) ? precision : fallback));
+  }
+
+  private void SaveInfoPrecisionPreference()
+  {
+    if (_doc == null)
+      return;
+    string precision = GetSelectedPrecision(_doc.ModelDistanceDisplayPrecision, 8).ToString(CultureInfo.InvariantCulture);
+    SetDocUnitPref(_doc, InfoPrecisionPreferenceKey(_infoPrecisionFormat), precision);
+    // Retain the active value for documents opened with older plug-in versions.
+    SetDocUnitPref(_doc, "Precision", precision);
   }
 
   private void EnsureDocUnitPrefsLoaded(RhinoDoc? doc)
@@ -5082,7 +5111,9 @@ public sealed class vObjectPropertiesPlusPanel : Panel
         && int.TryParse(savedPrecision, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedBits)
         ? Math.Max(0, Math.Min(8, parsedBits))
         : GetInfoPrecisionBitsFromDocOrModel(doc);
-      SetPrecisionDropOptions(_infoPrecisionDrop, GetSelectedPrecisionKindToken(), precisionBits);
+      _infoPrecisionFormat = GetSelectedFormatToken();
+      SetPrecisionDropOptions(_infoPrecisionDrop, GetSelectedPrecisionKindToken(),
+        ReadInfoPrecisionPreference(doc, _infoPrecisionFormat, precisionBits));
     }
     finally
     {
@@ -5152,8 +5183,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       SetDocUnitPref(_doc, key, (drop.SelectedValue?.ToString() ?? "").Trim().ToLowerInvariant());
 
     RefreshPrecisionDropOptions();
-    if (_doc != null)
-      SetDocUnitPref(_doc, "Precision", GetSelectedPrecision(_doc.ModelDistanceDisplayPrecision, 8).ToString(CultureInfo.InvariantCulture));
+    SaveInfoPrecisionPreference();
 
     RefreshFromCurrentSelection();
   }
@@ -5163,12 +5193,12 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     if (_isUpdatingUi)
       return;
 
+    SaveInfoPrecisionPreference();
     if (_doc != null)
       SetDocUnitPref(_doc, "Format", GetSelectedFormatToken());
 
     RefreshPrecisionDropOptions();
-    if (_doc != null)
-      SetDocUnitPref(_doc, "Precision", GetSelectedPrecision(_doc.ModelDistanceDisplayPrecision, 8).ToString(CultureInfo.InvariantCulture));
+    SaveInfoPrecisionPreference();
 
     RefreshFromCurrentSelection();
   }
@@ -5178,8 +5208,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     if (_isUpdatingUi)
       return;
 
-    if (_doc != null)
-      SetDocUnitPref(_doc, "Precision", GetSelectedPrecision(_doc.ModelDistanceDisplayPrecision, 8).ToString(CultureInfo.InvariantCulture));
+    SaveInfoPrecisionPreference();
 
     RefreshFromCurrentSelection();
   }
