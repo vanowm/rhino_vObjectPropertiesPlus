@@ -18,7 +18,12 @@ internal static class PartDataTargets
   }
 
   internal static bool IsCandidate(RhinoObject obj) => Supported(obj)
-    && ((obj.Attributes.GetGroupList()?.Length ?? 0) > 0 || obj.Geometry is Curve { IsClosed: true });
+    && ((obj.Attributes.GetGroupList()?.Length ?? 0) > 0 || obj.Geometry is Curve { IsClosed: true }
+      || IsSeamAllowance(obj));
+
+  private static bool IsSeamAllowance(RhinoObject obj) => obj.Geometry is Curve
+    && (obj.Attributes.GetUserString("vSeam.role") is "envelope" or "edge" or "join" or "chamfer" or "cap"
+      || string.Equals(obj.Attributes.Name, "SeamAllowance", StringComparison.OrdinalIgnoreCase));
 
   private static bool Supported(RhinoObject obj) => !obj.IsDeleted && !IsTableDecoration(obj)
     && obj.Geometry is Curve or AnnotationBase or Rhino.Geometry.Point or TextDot;
@@ -100,7 +105,8 @@ internal static class PartDataTargets
           continue;
         var region = regions[i];
         var boundary = items.Where(obj => obj.Geometry is Curve curve && Coincident(curve, region.Outline, tolerance))
-          .OrderByDescending(obj => ((Curve)obj.Geometry).GetLength()).FirstOrDefault();
+          .OrderByDescending(IsSeamAllowance)
+          .ThenByDescending(obj => ((Curve)obj.Geometry).GetLength()).FirstOrDefault();
         if (boundary == null)
           continue;
         var ids = items.Select(obj => obj.Id).ToHashSet();
@@ -154,11 +160,13 @@ internal static class PartDataTargets
     var cutting = closed.Where(obj => !LeafLayer(doc, obj).Equals(ReferenceLayer, StringComparison.OrdinalIgnoreCase)).ToArray();
     if (cutting.Length > 0)
       closed = cutting;
-    var loops = closed.Length > 0
-      ? closed.Select(obj => ((Curve)obj.Geometry).DuplicateCurve()).ToList()
-      : BooleanLoops(curves, tolerance);
+    var loops = closed.Select(obj => ((Curve)obj.Geometry).DuplicateCurve()).ToList();
     try
     {
+      if (objects.Any(IsSeamAllowance))
+        loops.AddRange(SeamLoops(doc, objects, tolerance));
+      if (loops.Count == 0)
+        loops.AddRange(BooleanLoops(curves, tolerance));
       foreach (var candidate in loops)
       {
         if (!candidate.IsClosed || !candidate.TryGetPlane(out var plane, tolerance))
@@ -186,6 +194,34 @@ internal static class PartDataTargets
     {
       foreach (var loop in loops)
         loop.Dispose();
+    }
+  }
+
+  private static List<Curve> SeamLoops(RhinoDoc doc, List<RhinoObject> objects, double tolerance)
+  {
+    var seamCurves = objects.Where(IsSeamAllowance).Select(obj => (Curve)obj.Geometry).ToArray();
+    var joined = Curve.JoinCurves(seamCurves, tolerance) ?? Array.Empty<Curve>();
+    if (joined.Length > 0 && joined.All(curve => curve.IsClosed && curve.TryGetPlane(out _, tolerance)))
+      return joined.ToList();
+    foreach (var curve in joined)
+      curve.Dispose();
+
+    // Partial allowances close against finished edges, including sections with zero allowance.
+    var cuttingCurves = objects.Where(obj => IsSeamAllowance(obj)
+      || !string.IsNullOrEmpty(obj.Attributes.GetUserString("vSeam.sourceOwner"))
+      || !LeafLayer(doc, obj).Equals(ReferenceLayer, StringComparison.OrdinalIgnoreCase))
+      .Select(obj => obj.Geometry).OfType<Curve>().ToArray();
+    var regions = BooleanLoops(cuttingCurves, tolerance);
+    try
+    {
+      return regions.Count > 0
+        ? (Curve.CreateBooleanUnion(regions, tolerance) ?? Array.Empty<Curve>()).ToList()
+        : new List<Curve>();
+    }
+    finally
+    {
+      foreach (var region in regions)
+        region.Dispose();
     }
   }
 
