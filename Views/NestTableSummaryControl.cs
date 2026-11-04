@@ -11,6 +11,13 @@ namespace vObjectPropertiesPlus.Views;
 
 internal sealed class NestTableSummaryControl : Panel
 {
+  private const bool DefaultRulerTicks = true;
+  private const bool DefaultRulerSizes = true;
+  private const bool DefaultRulerGrid = false;
+  private const bool DefaultRulerCursor = true;
+  private const bool DefaultRulerInches = true;
+  private const bool DefaultRulerFeet = false;
+  private const bool DefaultRulerYards = true;
   internal sealed record TableMetric(Guid Id, string Name, string Material, double? Yards, long? Parts);
   internal sealed record DisplayRow(string Table, string Parts, string Yards, bool Summary, Guid Id = default);
   private readonly TreeGridView _tree;
@@ -18,6 +25,10 @@ internal sealed class NestTableSummaryControl : Panel
   private readonly HashSet<string> _collapsedMaterials = new(StringComparer.OrdinalIgnoreCase);
   private readonly TableHighlightConduit _tableHighlight = new();
   private readonly Dictionary<Guid, RhinoObject> _tableBorders = new();
+  private readonly CheckBox _rulerTicks, _rulerSizes, _rulerGrid, _rulerCursor, _rulerInches, _rulerFeet, _rulerYards;
+  private readonly StackLayout _rulerOptions;
+  private DisplayConduit? _rulerPreview;
+  private Action<DisplayConduit, Guid[], bool, bool, bool, bool, bool, bool?, bool>? _setRulerTables;
   private RhinoDoc? _doc;
   private List<RhinoObject> _selection = new();
   private string _signature = "";
@@ -31,6 +42,20 @@ internal sealed class NestTableSummaryControl : Panel
 
   internal NestTableSummaryControl(int height)
   {
+    _rulerTicks = RulerToggle("Ticks", "NestTables.RulerTicks", DefaultRulerTicks);
+    _rulerSizes = RulerToggle("Sizes", "NestTables.RulerSizes", DefaultRulerSizes);
+    _rulerGrid = RulerGridToggle();
+    _rulerCursor = RulerToggle("Cursor", "NestTables.RulerCursor", DefaultRulerCursor);
+    _rulerCursor.ToolTip = "Show cursor-position arrows and coordinates around the table";
+    _rulerInches = RulerToggle("Inches", "NestTables.RulerInches", DefaultRulerInches);
+    _rulerFeet = RulerToggle("Feet", "NestTables.RulerFeet", DefaultRulerFeet);
+    _rulerYards = RulerToggle("Yards", "NestTables.RulerYards", DefaultRulerYards);
+    _rulerOptions = new StackLayout { Spacing = 2, Visible = false, Items =
+    {
+      new StackLayout { Orientation = Orientation.Horizontal, Spacing = 8, Items = { _rulerTicks, _rulerGrid } },
+      new StackLayout { Orientation = Orientation.Horizontal, Spacing = 8, Items = { _rulerSizes, _rulerCursor } },
+      new StackLayout { Orientation = Orientation.Horizontal, Spacing = 8, Items = { _rulerInches, _rulerFeet, _rulerYards } }
+    } };
     _tree = new TreeGridView { Height = height, Width = 10, ShowHeader = true,
       AllowMultipleSelection = true, AllowEmptySelection = true, GridLines = GridLines.Horizontal };
     _tree.LoadComplete += (_, _) =>
@@ -51,7 +76,127 @@ internal sealed class NestTableSummaryControl : Panel
       _tree.SelectedItems.OfType<TreeGridItem>().Select(item => item.Tag).OfType<DisplayRow>()
         .Select(row => row.Table + "\t" + row.Parts + "\t" + row.Yards));
     _tree.ContextMenu = new ContextMenu { Items = { copy } };
-    Content = new Panel { Padding = new Padding(10, 2, 6, 2), Content = _tree };
+    Content = new StackLayout { Padding = new Padding(10, 2, 6, 2), Spacing = 3,
+      HorizontalContentAlignment = HorizontalAlignment.Stretch, Items = { _rulerOptions, _tree } };
+  }
+
+  private CheckBox RulerToggle(string label, string key, bool fallback)
+  {
+    bool value = fallback;
+    try { value = vObjectPropertiesPlusPlugIn.Instance.Settings.GetBool(key, fallback); }
+    catch (Exception ex) { Log.Write("NestTables", $"Cannot read ruler setting: {ex.Message}"); }
+    var toggle = new CheckBox { Text = label, Checked = value };
+    toggle.CheckedChanged += (_, _) =>
+    {
+      try
+      {
+        var plugIn = vObjectPropertiesPlusPlugIn.Instance;
+        plugIn.Settings.SetBool(key, toggle.Checked == true);
+        plugIn.SaveSettings();
+      }
+      catch (Exception ex) { Log.Write("NestTables", $"Cannot save ruler setting: {ex.Message}"); }
+      UpdateTableRulers();
+    };
+    return toggle;
+  }
+
+  private CheckBox RulerGridToggle()
+  {
+    bool? state = DefaultRulerGrid ? null : false;
+    try
+    {
+      var settings = vObjectPropertiesPlusPlugIn.Instance.Settings;
+      state = settings.GetString("NestTables.RulerGridMode", "") switch
+      {
+        "Off" => false,
+        "3Feet" => null,
+        "4Feet" => true,
+        _ => settings.GetBool("NestTables.RulerGrid", DefaultRulerGrid) ? null : false
+      };
+    }
+    catch (Exception ex) { Log.Write("NestTables", $"Cannot read grid setting: {ex.Message}"); }
+    string Label() => state == false ? "Grid: Off" : state == null ? "Grid: 3 ft" : "Grid: 4 ft";
+    var toggle = new CheckBox { ThreeState = true, Checked = state, Text = Label(),
+      ToolTip = "Off; 3 ft; or 40 inches followed by 4 ft intervals. Preview only." };
+    bool cycling = false;
+    toggle.CheckedChanged += (_, _) =>
+    {
+      if (cycling) return;
+      cycling = true;
+      try
+      {
+        state = state == false ? null : state == null ? true : false;
+        toggle.Checked = state;
+        toggle.Text = Label();
+        var plugIn = vObjectPropertiesPlusPlugIn.Instance;
+        plugIn.Settings.SetString("NestTables.RulerGridMode", state == false ? "Off" : state == null ? "3Feet" : "4Feet");
+        plugIn.Settings.SetBool("NestTables.RulerGrid", state != false);
+        plugIn.SaveSettings();
+      }
+      catch (Exception ex) { Log.Write("NestTables", $"Cannot save grid setting: {ex.Message}"); }
+      finally { cycling = false; }
+      UpdateTableRulers();
+    };
+    return toggle;
+  }
+
+  private bool EnsureTableRulerPreview()
+  {
+    if (_rulerPreview != null) return true;
+    if (_doc == null) return false;
+    try
+    {
+      var assembly = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(item => item.GetName().Name == "vTools");
+      var type = assembly?.GetType("vTools.Commands.vNest");
+      var create = type?.GetMethod("CreateTableRulerPreview", new[] { typeof(RhinoDoc) });
+      var update = type?.GetMethod("UpdateTableRulerPreview", new[] { typeof(DisplayConduit), typeof(Guid[]),
+        typeof(bool), typeof(bool), typeof(bool), typeof(bool), typeof(bool), typeof(bool?), typeof(bool) });
+      if (create == null || update == null) return false;
+      _setRulerTables = update.CreateDelegate<Action<DisplayConduit, Guid[], bool, bool, bool, bool, bool, bool?, bool>>();
+      _rulerPreview = create.CreateDelegate<Func<RhinoDoc, DisplayConduit>>()(_doc);
+      return true;
+    }
+    catch (Exception ex)
+    {
+      DisposeTableRulers();
+      Log.Write("NestTables", $"vNest table rulers unavailable: {ex.Message}");
+      return false;
+    }
+  }
+
+  private void UpdateTableRulers()
+  {
+    bool redraw = _rulerPreview?.Enabled == true;
+    bool available = _started && HasTables && EnsureTableRulerPreview();
+    _rulerOptions.Visible = available;
+    if (available)
+    {
+      try
+      {
+        _setRulerTables!(_rulerPreview!, _tableBorders.Values.Select(border => border.Id).Distinct().ToArray(),
+          _rulerTicks.Checked == true, _rulerSizes.Checked == true, _rulerInches.Checked == true,
+          _rulerFeet.Checked == true, _rulerYards.Checked == true, _rulerGrid.Checked, _rulerCursor.Checked == true);
+      }
+      catch (Exception ex)
+      {
+        DisposeTableRulers();
+        Log.Write("NestTables", $"vNest table rulers could not update: {ex.Message}");
+      }
+    }
+    else if (_rulerPreview != null) DisposeTableRulers();
+    _rulerInches.Enabled = _rulerFeet.Enabled = _rulerYards.Enabled = _rulerSizes.Checked == true || _rulerCursor.Checked == true;
+    if (redraw || _rulerPreview?.Enabled == true) _doc?.Views.Redraw();
+  }
+
+  private void DisposeTableRulers()
+  {
+    bool redraw = _rulerPreview?.Enabled == true;
+    if (_rulerPreview is IDisposable disposable) disposable.Dispose();
+    else if (_rulerPreview != null) _rulerPreview.Enabled = false;
+    _rulerPreview = null;
+    _setRulerTables = null;
+    _rulerOptions.Visible = false;
+    if (redraw) _doc?.Views.Redraw();
   }
 
   internal Control ResizeTarget => _tree;
@@ -102,6 +247,7 @@ internal sealed class NestTableSummaryControl : Panel
     if (documentChanged)
     {
       ClearTableHighlight();
+      DisposeTableRulers();
       _collapsedMaterials.Clear();
       _dirty = true;
     }
@@ -133,6 +279,7 @@ internal sealed class NestTableSummaryControl : Panel
     finally { _updating = false; }
     TablesChanged?.Invoke(this, EventArgs.Empty);
     UpdateTableHighlight();
+    UpdateTableRulers();
   }
 
   internal void SetActive(bool active)
@@ -382,18 +529,24 @@ internal sealed class NestTableSummaryControl : Panel
     RhinoDoc.UndeleteRhinoObject += OnObjectChanged; RhinoDoc.ReplaceRhinoObject += OnObjectReplaced;
     RhinoDoc.ModifyObjectAttributes += OnAttributesChanged; RhinoDoc.GroupTableEvent += OnGroupChanged;
     Rhino.Commands.Command.EndCommand += OnCommandEnded;
+    RhinoDoc.DocumentPropertiesChanged += OnDocumentPropertiesChanged;
+    RhinoDoc.CloseDocument += OnDocumentClosed;
     _dirty = true;
     UpdateTableHighlight();
+    UpdateTableRulers();
   }
   internal void Stop()
   {
     ClearTableHighlight();
+    DisposeTableRulers();
     if (!_started) return;
     _started = false;
     RhinoDoc.AddRhinoObject -= OnObjectChanged; RhinoDoc.DeleteRhinoObject -= OnObjectChanged;
     RhinoDoc.UndeleteRhinoObject -= OnObjectChanged; RhinoDoc.ReplaceRhinoObject -= OnObjectReplaced;
     RhinoDoc.ModifyObjectAttributes -= OnAttributesChanged; RhinoDoc.GroupTableEvent -= OnGroupChanged;
     Rhino.Commands.Command.EndCommand -= OnCommandEnded;
+    RhinoDoc.DocumentPropertiesChanged -= OnDocumentPropertiesChanged;
+    RhinoDoc.CloseDocument -= OnDocumentClosed;
   }
   private void OnObjectChanged(object? sender, RhinoObjectEventArgs e)
   {
@@ -407,11 +560,16 @@ internal sealed class NestTableSummaryControl : Panel
   private void Invalidate(RhinoDoc doc, RhinoObject? obj)
   {
     if (_doc?.RuntimeSerialNumber != doc.RuntimeSerialNumber || !HasTables) return;
-    if (obj != null && !(obj.Attributes.GetGroupList() ?? Array.Empty<int>()).Any(_trackedGroups.Contains)) return;
+    if (obj != null && !_tableBorders.Values.Any(border => border.Id == obj.Id)
+      && !(obj.Attributes.GetGroupList() ?? Array.Empty<int>()).Any(_trackedGroups.Contains)) return;
     _dirty = true; QueueRefresh();
   }
   private void OnCommandEnded(object? sender, Rhino.Commands.CommandEventArgs e)
-  { if (_pending) QueueRefresh(); }
+  { if (_pending) QueueRefresh(); else if (HasTables) UpdateTableRulers(); }
+  private void OnDocumentPropertiesChanged(object? sender, DocumentEventArgs e)
+  { if (_doc?.RuntimeSerialNumber == e.DocumentSerialNumber) { _dirty = true; QueueRefresh(); } }
+  private void OnDocumentClosed(object? sender, DocumentEventArgs e)
+  { if (_doc?.RuntimeSerialNumber == e.DocumentSerialNumber) Update(null, Array.Empty<RhinoObject>()); }
   private void QueueRefresh()
   {
     if (!_started || _queued) return;
