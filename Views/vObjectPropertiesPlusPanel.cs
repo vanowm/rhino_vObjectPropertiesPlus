@@ -252,7 +252,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       () => _doc,
       () => SelectedRhinoObjects().ToList());
     _partDataEditor = new PartDataEditorControl(LoadPersistedEditorHeight(PartDataEditorHeightKey, 260, 120), LoadUiIcon);
-    _nestTableSummary = new NestTableSummaryControl(LoadPersistedEditorHeight(NestTablesEditorHeightKey, 120, 70));
+    _nestTableSummary = new NestTableSummaryControl(LoadPersistedEditorHeight(NestTablesEditorHeightKey, 120, 70), LoadUiIcon("Edit"));
 
     SetButtonIcon(_displayColorButton, "Layer");
     SetButtonIcon(_printColorButton, "Display_Display_Panel");
@@ -608,13 +608,13 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       {
         typeTable,
         _infoPlusSection,
+        _nestTablesSection,
         generalSection,
         _textSection,
         _nativeTextPanelHost,
         _nativeDimensionLeaderPanelHost,
         _attributesSection,
         _partDataSection,
-        _nestTablesSection,
         _pictureSection,
         _meshSection,
         _renderingSection,

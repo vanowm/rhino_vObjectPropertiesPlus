@@ -21,6 +21,11 @@ internal sealed class NestTableSummaryControl : Panel
   internal sealed record TableMetric(Guid Id, string Name, string Material, double? Yards, long? Parts);
   internal sealed record DisplayRow(string Table, string Parts, string Yards, bool Summary, Guid Id = default);
   private readonly TreeGridView _tree;
+  private readonly Image? _editIcon;
+  private readonly GridColumn _editColumn;
+  private readonly Button _editAllButton;
+  private readonly Label _editError = new() { Visible = false, Wrap = WrapMode.Word, TextColor = Color.FromArgb(175, 40, 35) };
+  private Func<RhinoDoc, Guid[], bool>? _editPlacedTables;
   private TreeGridItem _treeRoot = new();
   private readonly HashSet<string> _collapsedMaterials = new(StringComparer.OrdinalIgnoreCase);
   private readonly TableHighlightConduit _tableHighlight = new();
@@ -40,8 +45,12 @@ internal sealed class NestTableSummaryControl : Panel
   private bool _updating;
   private readonly HashSet<int> _trackedGroups = new();
 
-  internal NestTableSummaryControl(int height)
+  internal NestTableSummaryControl(int height, Image? editIcon = null)
   {
+    _editIcon = editIcon;
+    _editAllButton = new Button { Text = "Edit All", Image = editIcon, Height = 22,
+      ToolTip = "Edit all listed tables in vNest", Visible = false };
+    _editAllButton.Click += (_, _) => EditTables(null);
     _rulerTicks = RulerToggle("Ticks", "NestTables.RulerTicks", DefaultRulerTicks);
     _rulerSizes = RulerToggle("Sizes", "NestTables.RulerSizes", DefaultRulerSizes);
     _rulerGrid = RulerGridToggle();
@@ -68,6 +77,21 @@ internal sealed class NestTableSummaryControl : Panel
     _tree.Columns.Add(new GridColumn { HeaderText = "Table", Width = 96, DataCell = new TextBoxCell(0) });
     _tree.Columns.Add(new GridColumn { HeaderText = "Parts", Width = 38, DataCell = new TextBoxCell(1) });
     _tree.Columns.Add(new GridColumn { HeaderText = "Yards", Width = 56, Expand = true, DataCell = new TextBoxCell(2) });
+    var editCell = new CustomCell
+    {
+      CreateCell = _ => NewEditButton(),
+      ConfigureCell = (e, control) =>
+      {
+        if (control is not Button button) return;
+        button.Tag = e.Item is TreeGridItem item ? item.Tag : null;
+        button.Enabled = _started && _editPlacedTables != null && button.Tag is DisplayRow;
+        button.ToolTip = button.Tag is DisplayRow row
+          ? row.Summary ? $"Edit all {row.Table} tables in vNest" : $"Edit {row.Table} in vNest"
+          : "Edit table in vNest";
+      }
+    };
+    _editColumn = new GridColumn { HeaderText = "", Width = 26, DataCell = editCell, Visible = false };
+    _tree.Columns.Add(_editColumn);
     _tree.SelectedItemsChanged += (_, _) => UpdateTableHighlight();
     _tree.Expanded += (_, e) => SetMaterialExpanded(e.Item, true);
     _tree.Collapsed += (_, e) => SetMaterialExpanded(e.Item, false);
@@ -77,7 +101,67 @@ internal sealed class NestTableSummaryControl : Panel
         .Select(row => row.Table + "\t" + row.Parts + "\t" + row.Yards));
     _tree.ContextMenu = new ContextMenu { Items = { copy } };
     Content = new StackLayout { Padding = new Padding(10, 2, 6, 2), Spacing = 3,
-      HorizontalContentAlignment = HorizontalAlignment.Stretch, Items = { _rulerOptions, _tree } };
+      HorizontalContentAlignment = HorizontalAlignment.Stretch, Items =
+      { new StackLayout { Orientation = Orientation.Horizontal, HorizontalContentAlignment = HorizontalAlignment.Right,
+          Items = { _editAllButton } }, _rulerOptions, _tree, _editError } };
+  }
+
+  private Button NewEditButton()
+  {
+    var button = new Button { Image = _editIcon, Width = 23, Height = 20, ToolTip = "Edit table in vNest" };
+    if (_editIcon == null) button.Text = "...";
+    button.Click += (_, _) => { if (button.Tag is DisplayRow row) EditTables(row); };
+    return button;
+  }
+
+  private void UpdateEditAvailability()
+  {
+    if (_editPlacedTables == null)
+    {
+      try
+      {
+        var type = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(assembly => assembly.GetName().Name == "vTools")
+          ?.GetType("vTools.Commands.vNest");
+        var method = type?.GetMethod("EditPlacedTables", new[] { typeof(RhinoDoc), typeof(Guid[]) });
+        _editPlacedTables = method?.CreateDelegate<Func<RhinoDoc, Guid[], bool>>();
+      }
+      catch (Exception ex) { Log.Write("NestTables", $"vNest table editor unavailable: {ex.Message}"); }
+    }
+    bool available = _editPlacedTables != null;
+    _editColumn.Visible = _editAllButton.Visible = available;
+    _editAllButton.Enabled = available && _started && HasTables && _doc != null && RhinoApp.InCommand == 0;
+  }
+
+  internal static IEnumerable<Guid> TableIdsForEdit(TreeGridItem root, DisplayRow? scope)
+  {
+    var materials = root.Children.OfType<TreeGridItem>();
+    if (scope == null) return SelectedTableIds(materials);
+    if (scope.Summary)
+      return SelectedTableIds(materials.Where(item => item.Tag is DisplayRow row
+        && row.Table.Equals(scope.Table, StringComparison.OrdinalIgnoreCase)));
+    return SelectedTableIds(materials.SelectMany(item => item.Children.OfType<TreeGridItem>())
+      .Where(item => item.Tag is DisplayRow row && row.Id == scope.Id));
+  }
+
+  private void EditTables(DisplayRow? scope)
+  {
+    if (!_started || _updating || _doc == null || RhinoApp.InCommand > 0) return;
+    _editError.Visible = false;
+    try
+    {
+      UpdateEditAvailability();
+      var borders = TableIdsForEdit(_treeRoot, scope).Where(_tableBorders.ContainsKey)
+        .Select(id => _tableBorders[id]).Where(border => !border.IsDeleted).Select(border => border.Id).Distinct().ToArray();
+      if (borders.Length == 0) return;
+      if (_editPlacedTables == null || !_editPlacedTables(_doc, borders))
+        throw new InvalidOperationException("vNest could not open these tables. Finish any active nesting operation and check that the tables contain editable grouped parts.");
+    }
+    catch (Exception ex)
+    {
+      Log.Write("NestTables", $"Could not edit tables: {ex.Message}");
+      _editError.Text = ex.Message;
+      _editError.Visible = true;
+    }
   }
 
   private CheckBox RulerToggle(string label, string key, bool fallback)
@@ -256,11 +340,13 @@ internal sealed class NestTableSummaryControl : Panel
       + string.Join(",", selection.Select(obj => obj.Id.ToString("N") + ":" + obj.RuntimeSerialNumber));
     if (!_dirty && signature == _signature) return;
     _signature = signature; _dirty = false; _trackedGroups.Clear();
+    _editError.Visible = false;
     var selectedRows = documentChanged ? Array.Empty<DisplayRow>()
       : _tree.SelectedItems.OfType<TreeGridItem>().Select(item => item.Tag).OfType<DisplayRow>().ToArray();
     var selectedIds = selectedRows.Where(row => !row.Summary).Select(row => row.Id).ToHashSet();
     var selectedMaterials = selectedRows.Where(row => row.Summary).Select(row => row.Table)
       .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    UpdateEditAvailability();
     _updating = true;
     try
     {
@@ -277,6 +363,7 @@ internal sealed class NestTableSummaryControl : Panel
       HasTables = tables.Count > 0;
     }
     finally { _updating = false; }
+    UpdateEditAvailability();
     TablesChanged?.Invoke(this, EventArgs.Empty);
     UpdateTableHighlight();
     UpdateTableRulers();
@@ -532,6 +619,7 @@ internal sealed class NestTableSummaryControl : Panel
     RhinoDoc.DocumentPropertiesChanged += OnDocumentPropertiesChanged;
     RhinoDoc.CloseDocument += OnDocumentClosed;
     _dirty = true;
+    UpdateEditAvailability();
     UpdateTableHighlight();
     UpdateTableRulers();
   }
@@ -541,6 +629,7 @@ internal sealed class NestTableSummaryControl : Panel
     DisposeTableRulers();
     if (!_started) return;
     _started = false;
+    _editAllButton.Enabled = false;
     RhinoDoc.AddRhinoObject -= OnObjectChanged; RhinoDoc.DeleteRhinoObject -= OnObjectChanged;
     RhinoDoc.UndeleteRhinoObject -= OnObjectChanged; RhinoDoc.ReplaceRhinoObject -= OnObjectReplaced;
     RhinoDoc.ModifyObjectAttributes -= OnAttributesChanged; RhinoDoc.GroupTableEvent -= OnGroupChanged;
@@ -565,7 +654,7 @@ internal sealed class NestTableSummaryControl : Panel
     _dirty = true; QueueRefresh();
   }
   private void OnCommandEnded(object? sender, Rhino.Commands.CommandEventArgs e)
-  { if (_pending) QueueRefresh(); else if (HasTables) UpdateTableRulers(); }
+  { UpdateEditAvailability(); if (_pending) QueueRefresh(); else if (HasTables) UpdateTableRulers(); }
   private void OnDocumentPropertiesChanged(object? sender, DocumentEventArgs e)
   { if (_doc?.RuntimeSerialNumber == e.DocumentSerialNumber) { _dirty = true; QueueRefresh(); } }
   private void OnDocumentClosed(object? sender, DocumentEventArgs e)
