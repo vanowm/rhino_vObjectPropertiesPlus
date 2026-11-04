@@ -83,6 +83,7 @@ internal sealed class PartDataEditorControl : Panel
     AddBoolean(nest, "Included", "Included");
     AddNumber(nest, "Copies", "Copies", 1, PartDataStore.MaximumCopies, integer: true);
     _material.ToolTip = "Material name; empty uses the current vNest material";
+    _material.DropDownOpening += (_, _) => Run(RefreshMaterialChoices);
     bool materialDirty = false;
     _material.TextChanged += (_, _) => { if (!_updating) materialDirty = true; };
     void CommitMaterial()
@@ -569,31 +570,89 @@ internal sealed class PartDataEditorControl : Panel
   private void LoadMaterials(IReadOnlyList<JsonObject> records)
   {
     _materials.Clear();
+    bool sharedLibraryLoaded = LoadMaterialPresets(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+      "vTools", "materials.json"), sharedLibrary: true);
     try
     {
-      var assembly = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(item => item.GetName().Name == "vTools");
-      string? directory = assembly == null ? null : Path.GetDirectoryName(assembly.Location);
-      string? path = directory == null ? null : Path.Combine(directory, "vTools.config.json");
-      if (path != null && File.Exists(path) && new FileInfo(path).Length <= 1048576)
+      if (!sharedLibraryLoaded)
       {
-        var root = JsonNode.Parse(File.ReadAllText(path));
-        if (root?["vNest"]?["materialPresets"] is JsonArray presets)
-          foreach (var node in presets.OfType<JsonObject>())
-          {
-            string name = node["name"]?.GetValue<string>() ?? "";
-            if (name.Length == 0) continue;
-            var recipe = new JsonObject { ["Name"] = name, ["Width"] = node["width"]?.GetValue<double>() ?? 60,
-              ["Gap"] = node["gap"]?.GetValue<double>() ?? 0,
-              ["GrainDeviation"] = node["grainDeviation"]?.GetValue<double>() ?? 0 };
-            _materials[name] = recipe;
-          }
+        var assembly = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(item => item.GetName().Name == "vTools");
+        string? directory = assembly == null ? null : Path.GetDirectoryName(assembly.Location);
+        string? path = directory == null ? null : Path.Combine(directory, "vTools.config.json");
+        LoadMaterialPresets(path, sharedLibrary: false);
       }
     }
     catch (Exception ex) { Log.Write("PartData", $"Material presets unavailable: {ex.Message}"); }
     foreach (var data in records)
       if (data["Recipe"] is JsonObject recipe && recipe["Name"] is JsonValue value && value.TryGetValue<string>(out string? name))
         _materials.TryAdd(name, PartDataStore.Clone(recipe));
-    _material.DataStore = _materials.Keys.OrderBy(name => name, StringComparer.CurrentCultureIgnoreCase).ToArray();
+    _material.DataStore = _materials.Keys.Concat(records.Select(data => data["Material"]?.GetValue<string>() ?? ""))
+      .Where(name => name.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase)
+      .OrderBy(name => name, StringComparer.CurrentCultureIgnoreCase).ToArray();
+  }
+
+  private bool LoadMaterialPresets(string? path, bool sharedLibrary)
+  {
+    if (path == null || !File.Exists(path)) return false;
+    try
+    {
+      if (new FileInfo(path).Length > 1048576)
+        throw new InvalidDataException("The material library exceeds its size limit.");
+      var root = JsonNode.Parse(File.ReadAllText(path)) as JsonObject
+        ?? throw new InvalidDataException("The material library must contain a JSON object.");
+      if (sharedLibrary && PartDataStore.Number(root, "version") != 1)
+        throw new InvalidDataException("The material library version is not supported.");
+      var section = sharedLibrary ? root : root["vNest"] as JsonObject;
+      if (section == null) return false;
+      if (section["materialPresets"] == null) return true;
+      if (section["materialPresets"] is not JsonArray presets)
+        throw new InvalidDataException("The material preset list must contain a JSON array.");
+      foreach (var node in presets.OfType<JsonObject>())
+      {
+        try
+        {
+          string name = PartDataStore.NormalizeMaterial(node["name"]?.GetValue<string>() ?? "");
+          if (name.Length == 0 || name.Equals("Custom", StringComparison.OrdinalIgnoreCase)) continue;
+          var recipe = new JsonObject { ["Name"] = name, ["Width"] = PartDataStore.Number(node, "width"),
+            ["Gap"] = PartDataStore.Number(node, "gap"),
+            ["GrainDeviation"] = node["grainDeviation"] == null ? 0 : PartDataStore.Number(node, "grainDeviation") };
+          if ((node["grain"] ?? section["grain"]) is { } grain)
+          {
+            string mode = grain.GetValue<string>();
+            int index = Array.FindIndex(new[] { "Auto", "Force", "On", "Off" },
+              value => value.Equals(mode, StringComparison.OrdinalIgnoreCase));
+            if (index < 0) throw new InvalidDataException("Unknown material grain mode.");
+            recipe["Grain"] = index;
+          }
+          foreach (var field in new[] { ("obeyGrain", "ObeyGrain"), ("allowReverse", "AllowReverse") })
+            if ((node[field.Item1] ?? section[field.Item1]) is { } value)
+              recipe[field.Item2] = value.GetValue<bool>();
+          var record = PartDataStore.Defaults();
+          record["Recipe"] = recipe;
+          PartDataStore.ValidateNest(record);
+          _materials.TryAdd(name, PartDataStore.Clone(recipe));
+        }
+        catch (Exception ex) { Log.Write("PartData", $"Skipping invalid material preset: {ex.Message}"); }
+      }
+      return true;
+    }
+    catch (Exception ex) { Log.Write("PartData", $"Material presets unavailable ({Path.GetFileName(path)}): {ex.Message}"); }
+    return false;
+  }
+
+  private void RefreshMaterialChoices()
+  {
+    if (_updating || _doc == null || !_nestValid) return;
+    string text = _material.Text;
+    bool wasUpdating = _updating;
+    _updating = true;
+    try
+    {
+      LoadMaterials(TargetKeys().Select(key => PartDataStore.ReadNest(
+        _doc.Strings.GetValue(PartDataStore.NestSection, key))).ToList());
+      _material.Text = text;
+    }
+    finally { _updating = wasUpdating; }
   }
 
   private void OnUserStringChanged(object? sender, RhinoDoc.UserStringChangedArgs e)
