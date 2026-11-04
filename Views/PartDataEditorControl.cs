@@ -27,6 +27,7 @@ internal sealed class PartDataEditorControl : Panel
   private readonly Button _add;
   private readonly Button _delete;
   private readonly Button _reset;
+  private readonly Button _materialManagerButton;
   private readonly Bitmap _resetIcon = PictureEditorControl.CreateResetIcon(true);
   private readonly Bitmap _disabledResetIcon = PictureEditorControl.CreateResetIcon(false);
   private readonly TextBox _name = new() { Height = RowHeight, Width = FieldWidth,
@@ -102,10 +103,10 @@ internal sealed class PartDataEditorControl : Panel
     _material.LostFocus += (_, _) => Run(CommitMaterial);
     _material.KeyDown += (_, e) => { if (e.Key == Keys.Enter) { Run(CommitMaterial); e.Handled = true; } };
     _fieldRefreshers.Add(records => { _material.Text = Common(records, data => data["Material"] == null ? "" : PartDataStore.Text(data["Material"])); materialDirty = false; });
-    var recipeButton = ToolButton(icon("Edit"), "Edit the document material fallback; global presets take priority", EditRecipe);
+    _materialManagerButton = ToolButton(icon("Edit"), "Manage materials (vMaterialManager)", OpenMaterialManager);
     nest.Rows.Add(Row("Material", new StackLayout { Orientation = Orientation.Horizontal, Spacing = 2,
-      Items = { new StackLayoutItem(_material, true), recipeButton } }));
-    _nestControls.Add(_material); _nestControls.Add(recipeButton);
+      Items = { new StackLayoutItem(_material, true), _materialManagerButton } }));
+    _nestControls.Add(_material);
     AddChoice(nest, "Grain", "Grain", new[] { "Auto", "Force", "On", "Off" });
     var guideButton = new Button { Text = "Edit...", Height = RowHeight, Width = FieldWidth };
     guideButton.Click += (_, _) => Run(EditGuide);
@@ -393,6 +394,7 @@ internal sealed class PartDataEditorControl : Panel
         foreach (var refresh in _fieldRefreshers) refresh(nest);
       }
       foreach (var control in _nestControls) control.Enabled = _nestValid;
+      _materialManagerButton.Enabled = _nestValid && IsMaterialManagerAvailable();
       _reset.Enabled = keys.Any(key => !string.IsNullOrEmpty(_doc.Strings.GetValue(PartDataStore.NestSection, key)));
       _reset.Image = _reset.Enabled ? _resetIcon : _disabledResetIcon;
       _add.Enabled = _customValid; _grid.Enabled = _customValid; _search.Enabled = _customValid;
@@ -514,25 +516,23 @@ internal sealed class PartDataEditorControl : Panel
     return dialog.ShowModal(Rhino.UI.RhinoEtoApp.MainWindow);
   }
 
-  private void EditRecipe()
+  private static bool IsMaterialManagerAvailable()
   {
-    string name = PartDataStore.NormalizeMaterial(_material.Text);
-    if (name.Length == 0 || name == PartDataStore.MixedValue)
-      throw new InvalidOperationException("Choose or enter one material name first.");
-    JsonObject? stored = _doc != null && CurrentTargets().Count == 1
-      ? PartDataStore.ReadNest(_doc.Strings.GetValue(PartDataStore.NestSection, CurrentTargets()[0].Key))["Recipe"] as JsonObject : null;
-    var recipe = stored != null ? PartDataStore.Clone(stored)
-      : _materials.TryGetValue(name, out var existing) ? PartDataStore.Clone(existing)
-      : new JsonObject { ["Name"] = name, ["Width"] = 60.0, ["Gap"] = 0.0, ["GrainDeviation"] = 0.0 };
-    var width = new NumericStepper { MinValue = 0.001, MaxValue = double.MaxValue, DecimalPlaces = 3, Width = 150,
-      Value = PartDataStore.Number(recipe, "Width") };
-    var gap = new NumericStepper { MinValue = 0, MaxValue = double.MaxValue, DecimalPlaces = 3, Width = 150,
-      Value = PartDataStore.Number(recipe, "Gap") };
-    var deviation = new NumericStepper { MinValue = 0, MaxValue = 90, DecimalPlaces = 2, Width = 150,
-      Value = recipe["GrainDeviation"] == null ? 0 : PartDataStore.Number(recipe, "GrainDeviation") };
-    if (!EditDialog("Part Material", new[] { ("Width", (Control)width), ("Gap", (Control)gap), ("Deviation", (Control)deviation) })) return;
-    recipe["Name"] = name; recipe["Width"] = width.Value; recipe["Gap"] = gap.Value; recipe["GrainDeviation"] = deviation.Value;
-    Apply(false, data => { data["Material"] = name; data["Recipe"] = PartDataStore.Clone(recipe); });
+    var info = Rhino.PlugIns.PlugIn.GetPlugInInfo(new Guid("2607512e-a1fc-4cf9-9329-a293431437a0"));
+    return info != null && (info.IsLoaded || !info.IsLoadProtected(out _))
+      && Rhino.Commands.Command.LookupCommandId("vMaterialManager", true) != Guid.Empty;
+  }
+
+  private void OpenMaterialManager()
+  {
+    if (_doc == null) return;
+    if (RhinoApp.InCommand > 0)
+      throw new InvalidOperationException("Finish the current Rhino command before opening the material manager.");
+    if (!IsMaterialManagerAvailable())
+      throw new InvalidOperationException("vMaterialManager is unavailable. Install or enable a vTools version that includes it.");
+    if (!RhinoApp.RunScript("_vMaterialManager", false))
+      throw new InvalidOperationException("Rhino could not open vMaterialManager.");
+    RefreshMaterialChoices();
   }
 
   private void EditGuide()
@@ -683,7 +683,10 @@ internal sealed class PartDataEditorControl : Panel
     _targetsDirty = true; QueueRefresh();
   }
   private void OnCommandEnded(object? sender, Rhino.Commands.CommandEventArgs e)
-  { if (_pending) QueueRefresh(); }
+  {
+    _materialManagerButton.Enabled = _nestValid && IsMaterialManagerAvailable();
+    if (_pending) QueueRefresh();
+  }
   private void QueueRefresh()
   {
     if (!_started || !_active || _queued) return;
