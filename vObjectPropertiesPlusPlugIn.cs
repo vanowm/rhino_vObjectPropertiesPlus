@@ -40,6 +40,7 @@ public class vObjectPropertiesPlusPlugIn : PlugIn
     RhinoApp.WriteLine($"{LocalPlugInName} v{versionText}");
     Log.Write("OnLoad: plugin loaded.");
     RhinoApp.Closing += OnRhinoClosing;
+    Helpers.NestTableGumball.Start();
 
     var panelGuid = typeof(Views.vObjectPropertiesPlusPanel).GUID;
     Log.Write($"OnLoad: registering panel GUID={panelGuid}");
@@ -72,6 +73,7 @@ public class vObjectPropertiesPlusPlugIn : PlugIn
 
   private static void OnRhinoClosing(object? sender, EventArgs e)
   {
+    Helpers.NestTableGumball.Stop();
     Helpers.PictureImageProcessor.CleanupTemporaryFiles();
   }
 

@@ -133,6 +133,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private int _attributePointerFocusGeneration;
   private readonly Control? _nativeTextPanel;
   private object? _nativeTextViewModel;
+  private uint _nativeTextBoundDocSerial;
+  private readonly HashSet<Guid> _nativeTextBoundObjectIds = new();
   private readonly Panel _nativeDimensionLeaderPanelHost;
   private readonly Panel _nativeDimensionLeaderPanelContent;
   private readonly Dictionary<string, Control> _nativeDimensionLeaderPanels = new();
@@ -191,6 +193,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private readonly FocusHighlightConduit _focusHighlightConduit = new();
   private readonly FocusHighlightConduit _typeDropPreviewConduit = new();
   private readonly FocusHighlightConduit _groupHighlightConduit = new();
+  private readonly FocusHighlightConduit _partDataHighlightConduit = new();
   private System.Windows.Controls.ComboBox? _nativeTypeDrop;
   private int _hoveredTypeDropIndex = -1;
   private bool _focusHighlightSuspendedForTypeDropHover;
@@ -564,7 +567,11 @@ public sealed class vObjectPropertiesPlusPanel : Panel
         _partDataEditor.SetActive(!value);
       }, _partDataEditor.ResizeTarget, _partDataEditor.ResizeTarget, PartDataEditorHeightKey, 120);
     _partDataSection.Visible = false;
-    _partDataEditor.TargetsChanged += (_, _) => _partDataSection.Visible = _partDataEditor.HasParts;
+    _partDataEditor.TargetsChanged += (_, _) =>
+    {
+      _partDataSection.Visible = _partDataEditor.HasParts;
+      UpdatePartDataHighlight();
+    };
     _nestTablesSection = CreateFlatSection("Nest Tables", _nestTableSummary,
       () => _nestTablesSectionCollapsed,
       value =>
@@ -699,6 +706,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       (_nativeTextViewModel as IDisposable)?.Dispose();
       (_nativeDimensionLeaderViewModel as IDisposable)?.Dispose();
       _nativeTextViewModel = null;
+      _nativeTextBoundDocSerial = 0;
+      _nativeTextBoundObjectIds.Clear();
       _nativeDimensionLeaderViewModel = null;
       _pictureEditor.Stop();
       _partDataEditor.Stop();
@@ -2093,6 +2102,19 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _groupHighlightConduit.Enabled = false;
     _groupHighlightSuspendedForTypeDropHover = false;
     if (wasHighlighting)
+      _doc?.Views.Redraw();
+  }
+
+  private void UpdatePartDataHighlight()
+  {
+    bool wasHighlighting = _partDataHighlightConduit.Enabled;
+    var boundary = _panelLoaded ? _partDataEditor.FocusedPartBoundary : null;
+    if (boundary != null)
+      _partDataHighlightConduit.SetObject(boundary);
+    else
+      _partDataHighlightConduit.Clear();
+    _partDataHighlightConduit.Enabled = boundary != null;
+    if (wasHighlighting || boundary != null)
       _doc?.Views.Redraw();
   }
 
@@ -5680,10 +5702,14 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       _selectedObjectsDocSerial = 0;
     }
 
-    protected override void DrawOverlay(DrawEventArgs e)
+    protected override void DrawForeground(DrawEventArgs e)
     {
-      base.DrawOverlay(e);
-      
+      base.DrawForeground(e);
+      if (e.RhinoDoc == null || _obj != null && (_obj.IsDeleted || _obj.IsHidden
+        || _obj.Document?.RuntimeSerialNumber != e.RhinoDoc.RuntimeSerialNumber))
+        return;
+
+      // Draw after table contents are repainted, independently of native selection or feedback mode.
       // If we have a specific segment curve, draw only that
       if (_segmentCurve != null)
       {
@@ -6980,6 +7006,12 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     if (textObjects.Count == 0 || textObjects.Count != textRelatedCount)
       return false;
 
+    // Frame and attribute updates can refresh the same title while a new line is still being entered.
+    if (_nativeTextViewModel != null && _nativeTextBoundDocSerial == doc.RuntimeSerialNumber
+      && _nativeTextBoundObjectIds.SetEquals(textObjects.Select(obj => obj.Id))
+      && _nativeTextPanel.ControlObject is System.Windows.UIElement { IsKeyboardFocusWithin: true })
+      return true;
+
     try
     {
       var assembly = _nativeTextPanel.GetType().Assembly;
@@ -7016,6 +7048,9 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
       (_nativeTextViewModel as IDisposable)?.Dispose();
       _nativeTextViewModel = viewModel;
+      _nativeTextBoundDocSerial = doc.RuntimeSerialNumber;
+      _nativeTextBoundObjectIds.Clear();
+      _nativeTextBoundObjectIds.UnionWith(textObjects.Select(obj => obj.Id));
       RestoreNativeEditorHeight(_nativeTextPanel, NativeTextEditorHeightKey);
       return true;
     }
@@ -7163,7 +7198,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     string contentText = contents.Count == 1 ? contents[0] : VariesText;
     if (TextContentEquivalent(_textContentArea.Text ?? "", contentText))
       _textContentDirty = false;
-    if (_textContentDirty && _textContentUserEditing)
+    // Rhino may omit an unfinished trailing paragraph after the debounce commit; keep the editor draft until blur.
+    if (_textContentUserEditing)
       return;
 
     _textContentBaseline = contentText;

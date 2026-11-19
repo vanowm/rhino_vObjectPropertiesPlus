@@ -5,6 +5,7 @@ using Rhino;
 using Rhino.Display;
 using Rhino.DocObjects;
 using Rhino.Geometry;
+using vObjectPropertiesPlus.Helpers;
 using Environment = System.Environment;
 
 namespace vObjectPropertiesPlus.Views;
@@ -16,10 +17,13 @@ internal sealed class NestTableSummaryControl : Panel
   private const bool DefaultRulerGrid = false;
   private const bool DefaultRulerCursor = true;
   private const bool DefaultRulerInches = true;
-  private const bool DefaultRulerFeet = false;
+  private const bool DefaultRulerFeet = true;
   private const bool DefaultRulerYards = true;
-  internal sealed record TableMetric(Guid Id, string Name, string Material, double? Yards, long? Parts);
-  internal sealed record DisplayRow(string Table, string Parts, string Yards, bool Summary, Guid Id = default);
+  private const int MaximumTableSettingsCharacters = 65536; // Maximum JSON characters inspected for a table's saved material identity; larger or invalid metadata is not highlighted.
+  internal sealed record TableMetric(Guid Id, string Name, string Material, double? Yards, long? Parts)
+  { internal bool IsPatternSmith {get;init;} }
+  internal sealed record DisplayRow(string Table, string Parts, string Yards, bool Summary, Guid Id = default)
+  { internal bool IsPatternSmith {get;init;} }
   private readonly TreeGridView _tree;
   private readonly Image? _editIcon;
   private readonly GridColumn _editColumn;
@@ -32,8 +36,10 @@ internal sealed class NestTableSummaryControl : Panel
   private readonly Dictionary<Guid, RhinoObject> _tableBorders = new();
   private readonly CheckBox _rulerTicks, _rulerSizes, _rulerGrid, _rulerCursor, _rulerInches, _rulerFeet, _rulerYards;
   private readonly StackLayout _rulerOptions;
-  private DisplayConduit? _rulerPreview;
-  private Action<DisplayConduit, Guid[], bool, bool, bool, bool, bool, bool?, bool>? _setRulerTables;
+  private Func<bool?[]>? _getRulerOptions;
+  private Action<bool, bool, bool, bool, bool, bool?, bool, bool>? _setRulerOptions;
+  private bool _syncingRulers;
+  private readonly bool _legacyRulerPreferences;
   private RhinoDoc? _doc;
   private List<RhinoObject> _selection = new();
   private string _signature = "";
@@ -47,6 +53,7 @@ internal sealed class NestTableSummaryControl : Panel
 
   internal NestTableSummaryControl(int height, Image? editIcon = null)
   {
+    _legacyRulerPreferences = vObjectPropertiesPlusPlugIn.Instance.Settings.Keys.Any(key => key.StartsWith("NestTables.Ruler", StringComparison.Ordinal));
     _editIcon = editIcon;
     _editAllButton = new Button { Text = "Edit All", Image = editIcon, Height = 22,
       ToolTip = "Edit all listed tables in vNest", Visible = false };
@@ -92,6 +99,7 @@ internal sealed class NestTableSummaryControl : Panel
     };
     _editColumn = new GridColumn { HeaderText = "", Width = 26, DataCell = editCell, Visible = false };
     _tree.Columns.Add(_editColumn);
+    MaterialAppearance.Grid(_tree,0,item=>item is TreeGridItem {Tag:DisplayRow {Summary:true,IsPatternSmith:true}});
     _tree.SelectedItemsChanged += (_, _) => UpdateTableHighlight();
     _tree.Expanded += (_, e) => SetMaterialExpanded(e.Item, true);
     _tree.Collapsed += (_, e) => SetMaterialExpanded(e.Item, false);
@@ -172,14 +180,7 @@ internal sealed class NestTableSummaryControl : Panel
     var toggle = new CheckBox { Text = label, Checked = value };
     toggle.CheckedChanged += (_, _) =>
     {
-      try
-      {
-        var plugIn = vObjectPropertiesPlusPlugIn.Instance;
-        plugIn.Settings.SetBool(key, toggle.Checked == true);
-        plugIn.SaveSettings();
-      }
-      catch (Exception ex) { Log.Write("NestTables", $"Cannot save ruler setting: {ex.Message}"); }
-      UpdateTableRulers();
+      if (!_syncingRulers) SaveTableRulerOptions();
     };
     return toggle;
   }
@@ -199,12 +200,13 @@ internal sealed class NestTableSummaryControl : Panel
       };
     }
     catch (Exception ex) { Log.Write("NestTables", $"Cannot read grid setting: {ex.Message}"); }
-    string Label() => state == false ? "Grid: Off" : state == null ? "Grid: 3 ft" : "Grid: 4 ft";
+    string Label() => state == false ? "Grid: Off" : state == null ? "Grid: yards" : "Grid: sections";
     var toggle = new CheckBox { ThreeState = true, Checked = state, Text = Label(),
-      ToolTip = "Off; 3 ft; or 40 inches followed by 4 ft intervals. Preview only." };
+      ToolTip = "Off; primary grid; or alternate grid. Spacing and first-line offset are configured in vSettings. Not exported." };
     bool cycling = false;
     toggle.CheckedChanged += (_, _) =>
     {
+      if (_syncingRulers) { state = toggle.Checked; toggle.Text = Label(); return; }
       if (cycling) return;
       cycling = true;
       try
@@ -212,37 +214,38 @@ internal sealed class NestTableSummaryControl : Panel
         state = state == false ? null : state == null ? true : false;
         toggle.Checked = state;
         toggle.Text = Label();
-        var plugIn = vObjectPropertiesPlusPlugIn.Instance;
-        plugIn.Settings.SetString("NestTables.RulerGridMode", state == false ? "Off" : state == null ? "3Feet" : "4Feet");
-        plugIn.Settings.SetBool("NestTables.RulerGrid", state != false);
-        plugIn.SaveSettings();
       }
       catch (Exception ex) { Log.Write("NestTables", $"Cannot save grid setting: {ex.Message}"); }
       finally { cycling = false; }
-      UpdateTableRulers();
+      SaveTableRulerOptions();
     };
     return toggle;
   }
 
-  private bool EnsureTableRulerPreview()
+  private bool EnsureTableRulerOptions()
   {
-    if (_rulerPreview != null) return true;
-    if (_doc == null) return false;
+    if (_getRulerOptions != null && _setRulerOptions != null) return true;
     try
     {
       var assembly = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(item => item.GetName().Name == "vTools");
       var type = assembly?.GetType("vTools.Commands.vNest");
-      var create = type?.GetMethod("CreateTableRulerPreview", new[] { typeof(RhinoDoc) });
-      var update = type?.GetMethod("UpdateTableRulerPreview", new[] { typeof(DisplayConduit), typeof(Guid[]),
-        typeof(bool), typeof(bool), typeof(bool), typeof(bool), typeof(bool), typeof(bool?), typeof(bool) });
-      if (create == null || update == null) return false;
-      _setRulerTables = update.CreateDelegate<Action<DisplayConduit, Guid[], bool, bool, bool, bool, bool, bool?, bool>>();
-      _rulerPreview = create.CreateDelegate<Func<RhinoDoc, DisplayConduit>>()(_doc);
+      var read = type?.GetMethod("GetSelectedTableRulerOptions", Type.EmptyTypes);
+      var update = type?.GetMethod("SetSelectedTableRulerOptions", new[] {
+        typeof(bool), typeof(bool), typeof(bool), typeof(bool), typeof(bool), typeof(bool?), typeof(bool), typeof(bool) });
+      if (read == null || update == null) return false;
+      var get = read.CreateDelegate<Func<bool?[]>>();
+      var set = update.CreateDelegate<Action<bool, bool, bool, bool, bool, bool?, bool, bool>>();
+      if (_legacyRulerPreferences)
+        set(_rulerTicks.Checked == true, _rulerSizes.Checked == true, _rulerInches.Checked == true,
+          _rulerFeet.Checked == true, _rulerYards.Checked == true, _rulerGrid.Checked, _rulerCursor.Checked == true, true);
+      _getRulerOptions = get;
+      _setRulerOptions = set;
       return true;
     }
     catch (Exception ex)
     {
-      DisposeTableRulers();
+      _getRulerOptions = null;
+      _setRulerOptions = null;
       Log.Write("NestTables", $"vNest table rulers unavailable: {ex.Message}");
       return false;
     }
@@ -250,37 +253,47 @@ internal sealed class NestTableSummaryControl : Panel
 
   private void UpdateTableRulers()
   {
-    bool redraw = _rulerPreview?.Enabled == true;
-    bool available = _started && HasTables && EnsureTableRulerPreview();
+    bool available = _started && HasTables && EnsureTableRulerOptions();
     _rulerOptions.Visible = available;
     if (available)
     {
       try
       {
-        _setRulerTables!(_rulerPreview!, _tableBorders.Values.Select(border => border.Id).Distinct().ToArray(),
-          _rulerTicks.Checked == true, _rulerSizes.Checked == true, _rulerInches.Checked == true,
-          _rulerFeet.Checked == true, _rulerYards.Checked == true, _rulerGrid.Checked, _rulerCursor.Checked == true);
+        var options = _getRulerOptions!();
+        if (options.Length != 7) throw new InvalidOperationException("Unexpected vNest ruler options.");
+        _syncingRulers = true;
+        try
+        {
+          _rulerTicks.Checked = options[0]; _rulerSizes.Checked = options[1];
+          _rulerInches.Checked = options[2]; _rulerFeet.Checked = options[3]; _rulerYards.Checked = options[4];
+          _rulerGrid.Checked = options[5]; _rulerCursor.Checked = options[6];
+        }
+        finally { _syncingRulers = false; }
       }
       catch (Exception ex)
       {
-        DisposeTableRulers();
+        _rulerOptions.Visible = false;
         Log.Write("NestTables", $"vNest table rulers could not update: {ex.Message}");
       }
     }
-    else if (_rulerPreview != null) DisposeTableRulers();
     _rulerInches.Enabled = _rulerFeet.Enabled = _rulerYards.Enabled = _rulerSizes.Checked == true || _rulerCursor.Checked == true;
-    if (redraw || _rulerPreview?.Enabled == true) _doc?.Views.Redraw();
+  }
+
+  private void SaveTableRulerOptions()
+  {
+    try
+    {
+      if (!EnsureTableRulerOptions()) return;
+      _setRulerOptions!(_rulerTicks.Checked == true, _rulerSizes.Checked == true, _rulerInches.Checked == true,
+        _rulerFeet.Checked == true, _rulerYards.Checked == true, _rulerGrid.Checked, _rulerCursor.Checked == true, false);
+      UpdateTableRulers();
+    }
+    catch (Exception ex) { Log.Write("NestTables", $"Cannot save vNest ruler settings: {ex.Message}"); }
   }
 
   private void DisposeTableRulers()
   {
-    bool redraw = _rulerPreview?.Enabled == true;
-    if (_rulerPreview is IDisposable disposable) disposable.Dispose();
-    else if (_rulerPreview != null) _rulerPreview.Enabled = false;
-    _rulerPreview = null;
-    _setRulerTables = null;
     _rulerOptions.Visible = false;
-    if (redraw) _doc?.Views.Redraw();
   }
 
   internal Control ResizeTarget => _tree;
@@ -297,9 +310,10 @@ internal sealed class NestTableSummaryControl : Panel
       double? yards = material.All(table => table.Yards.HasValue) ? material.Sum(table => table.Yards!.Value) : null;
       var children = material.OrderBy(table => table.Name, StringComparer.CurrentCultureIgnoreCase)
         .Select(table => new DisplayRow(table.Name, table.Parts?.ToString(CultureInfo.CurrentCulture) ?? "n/a",
-          YardText(table.Yards), false, table.Id))
+          YardText(table.Yards), false, table.Id){IsPatternSmith=table.IsPatternSmith})
         .Select(row => (ITreeGridItem)new TreeGridItem(new object[] { row.Table, row.Parts, row.Yards }) { Tag = row });
-      var total = new DisplayRow(material.Key, parts?.ToString(CultureInfo.CurrentCulture) ?? "n/a", YardText(yards), true);
+      var total = new DisplayRow(material.Key, parts?.ToString(CultureInfo.CurrentCulture) ?? "n/a", YardText(yards), true)
+        {IsPatternSmith=material.Any(table=>table.IsPatternSmith)};
       materials.Add(new TreeGridItem(children, new object[] { total.Table, total.Parts, total.Yards })
         { Tag = total, Expanded = true });
     }
@@ -432,7 +446,7 @@ internal sealed class NestTableSummaryControl : Panel
     foreach (var root in roots)
     {
       _tableBorders[root.Key] = root.Value.Border;
-      try { tables.Add(ReadTable(doc, root.Key, root.Value.Border, root.Value.Group, root.Value.Members)); }
+      try { tables.Add(ReadTable(doc, root.Key, root.Value.Border, root.Value.Group, root.Value.Members) with {IsPatternSmith=HasPatternSmithMaterial(root.Value.Border.Attributes)}); }
       catch (Exception ex)
       {
         Log.Write("NestTables", $"Table measurement failed: {ex.Message}");
@@ -441,6 +455,20 @@ internal sealed class NestTableSummaryControl : Panel
       }
     }
     return tables;
+  }
+
+  private static bool HasPatternSmithMaterial(ObjectAttributes attributes)
+  {
+    string? json=attributes.GetUserString("vNest.tableSettings");
+    if(string.IsNullOrWhiteSpace(json)||json.Length>MaximumTableSettingsCharacters)return false;
+    try
+    {
+      using var document=System.Text.Json.JsonDocument.Parse(json);
+      if(document.RootElement.ValueKind!=System.Text.Json.JsonValueKind.Object||!document.RootElement.TryGetProperty("Material",out var material)||
+        material.ValueKind!=System.Text.Json.JsonValueKind.Object||!material.TryGetProperty("PatternSmith",out var reference)||reference.ValueKind!=System.Text.Json.JsonValueKind.Object)return false;
+      return new[]{"Id","Name","Catalog"}.All(key=>reference.TryGetProperty(key,out var value)&&value.ValueKind==System.Text.Json.JsonValueKind.String&&!string.IsNullOrWhiteSpace(value.GetString()));
+    }
+    catch(System.Text.Json.JsonException){return false;}
   }
 
   private static TableMetric ReadTable(RhinoDoc doc, Guid id, RhinoObject border, int group, RhinoObject[] members)

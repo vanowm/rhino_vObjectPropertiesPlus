@@ -15,6 +15,7 @@ internal sealed class PartDataEditorControl : Panel
   private const int LabelWidth = 80;
   private const int FieldWidth = 90;
   private const int RowHeight = 20;
+  private const string PatternSmithBrushKey = "vTools.PatternSmithMaterialText"; // Local WPF resource key; color is shared with vSettings when vTools is loaded.
   private readonly DropDown _parts = new() { Height = RowHeight, Width = FieldWidth };
   private readonly Label _error = new() { Wrap = WrapMode.Word, TextColor = Color.FromArgb(175, 40, 35), Visible = false };
   private readonly GridView _grid = new() { AllowMultipleSelection = true, ShowHeader = true };
@@ -53,6 +54,9 @@ internal sealed class PartDataEditorControl : Panel
   private string[] _editingTargets = Array.Empty<string>();
   private uint _editingDocSerial;
   private readonly Dictionary<string, JsonObject> _materials = new(StringComparer.OrdinalIgnoreCase);
+  private System.Windows.Controls.ComboBox? _nativeMaterials;
+  private System.Windows.Media.Brush? _ordinaryMaterialBrush;
+  private System.Windows.FontWeight _ordinaryMaterialWeight;
 
   private sealed class FieldRow(string key, string value)
   {
@@ -78,15 +82,17 @@ internal sealed class PartDataEditorControl : Panel
       if (string.IsNullOrEmpty(_focusedPartKey)) _focusedPartKey = null;
       _recordSignature = "";
       RefreshRecords();
+      TargetsChanged?.Invoke(this, EventArgs.Empty);
     };
 
     var nest = new TableLayout { Spacing = new Size(4, 2), Padding = new Padding(2, 5) };
     AddBoolean(nest, "Included", "Included");
     AddNumber(nest, "Copies", "Copies", 1, PartDataStore.MaximumCopies, integer: true);
     _material.ToolTip = "Material name; empty uses the current vNest material";
-    _material.DropDownOpening += (_, _) => Run(RefreshMaterialChoices);
+    _material.DropDownOpening += (_, _) => Run(() => { RefreshMaterialChoices(); ConfigureMaterialChoices(); });
+    _material.Load += (_, _) => ConfigureMaterialChoices();
     bool materialDirty = false;
-    _material.TextChanged += (_, _) => { if (!_updating) materialDirty = true; };
+    _material.TextChanged += (_, _) => { if (!_updating) materialDirty = true; RefreshMaterialItemStyles(); };
     void CommitMaterial()
     {
       if (_updating || !materialDirty || _material.Text == PartDataStore.MixedValue) return;
@@ -107,6 +113,7 @@ internal sealed class PartDataEditorControl : Panel
     nest.Rows.Add(Row("Material", new StackLayout { Orientation = Orientation.Horizontal, Spacing = 2,
       Items = { new StackLayoutItem(_material, true), _materialManagerButton } }));
     _nestControls.Add(_material);
+    AddBoolean(nest, "Face down", "FaceDown", tooltip: "Cut this part with the material face down without mirroring its geometry. vNest uses separate tables for face-up and face-down parts.");
     AddChoice(nest, "Grain", "Grain", new[] { "Auto", "Force", "On", "Off" });
     var guideButton = new Button { Text = "Edit...", Height = RowHeight, Width = FieldWidth };
     guideButton.Click += (_, _) => Run(EditGuide);
@@ -171,6 +178,10 @@ internal sealed class PartDataEditorControl : Panel
   internal Control ResizeTarget => _tabs;
   internal bool HasParts { get; private set; }
   internal event EventHandler? TargetsChanged;
+  internal RhinoObject? FocusedPartBoundary => _started && _active && _doc != null
+    && (_focusedPartKey != null || _targets.Count == 1)
+    && CurrentTargets().FirstOrDefault() is { } target
+      ? _doc.Objects.FindId(target.BoundaryId) : null;
 
   private Button ToolButton(Image? image, string tooltip, Action action)
   {
@@ -193,17 +204,21 @@ internal sealed class PartDataEditorControl : Panel
     return records.All(data => value(data) == first) ? first : PartDataStore.MixedValue;
   }
 
-  private void AddBoolean(TableLayout table, string label, string key, Action<JsonObject>? extra = null)
+  private void AddBoolean(TableLayout table, string label, string key, Action<JsonObject>? extra = null, string? tooltip = null)
   {
-    var check = new CheckBox { ThreeState = true, Height = RowHeight };
+    var check = new CheckBox { Height = RowHeight, ToolTip = tooltip };
     check.CheckedChanged += (_, _) =>
     {
       if (!_updating && check.Checked.HasValue)
+      {
+        check.ThreeState = false;
         Apply(false, data => { data[key] = check.Checked.Value; extra?.Invoke(data); });
+      }
     };
     _fieldRefreshers.Add(records =>
     {
       string common = Common(records, data => PartDataStore.Boolean(data, key, false).ToString()!);
+      check.ThreeState = common == PartDataStore.MixedValue;
       check.Checked = common == PartDataStore.MixedValue ? null : common == "True";
     });
     _nestControls.Add(check); table.Rows.Add(Row(label, check));
@@ -302,12 +317,14 @@ internal sealed class PartDataEditorControl : Panel
     RhinoDoc.ModifyObjectAttributes -= OnAttributesChanged;
     Rhino.Commands.Command.EndCommand -= OnCommandEnded;
     _pending = false;
+    TargetsChanged?.Invoke(this, EventArgs.Empty);
   }
 
   internal void SetActive(bool active)
   {
     _active = active;
     if (active) { _recordSignature = ""; Update(_doc, _selection); }
+    else TargetsChanged?.Invoke(this, EventArgs.Empty);
   }
 
   internal void Update(RhinoDoc? doc, IReadOnlyList<RhinoObject> selection)
@@ -589,6 +606,7 @@ internal sealed class PartDataEditorControl : Panel
     _material.DataStore = _materials.Keys.Concat(records.Select(data => data["Material"]?.GetValue<string>() ?? ""))
       .Where(name => name.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase)
       .OrderBy(name => name, StringComparer.CurrentCultureIgnoreCase).ToArray();
+    RefreshMaterialItemStyles();
   }
 
   private bool LoadMaterialPresets(string? path, bool sharedLibrary)
@@ -627,6 +645,8 @@ internal sealed class PartDataEditorControl : Panel
           foreach (var field in new[] { ("obeyGrain", "ObeyGrain"), ("allowReverse", "AllowReverse") })
             if ((node[field.Item1] ?? section[field.Item1]) is { } value)
               recipe[field.Item2] = value.GetValue<bool>();
+          if (ReadPatternSmithReference(node["patternSmith"], lowerCase: true) is {} reference)
+            recipe["PatternSmith"] = reference;
           var record = PartDataStore.Defaults();
           record["Recipe"] = recipe;
           PartDataStore.ValidateNest(record);
@@ -638,6 +658,64 @@ internal sealed class PartDataEditorControl : Panel
     }
     catch (Exception ex) { Log.Write("PartData", $"Material presets unavailable ({Path.GetFileName(path)}): {ex.Message}"); }
     return false;
+  }
+
+  private static JsonObject? ReadPatternSmithReference(JsonNode? node, bool lowerCase = false)
+  {
+    if (node is not JsonObject source) return null;
+    string Text(string field) => source[lowerCase ? char.ToLowerInvariant(field[0]) + field[1..] : field]
+      is JsonValue value && value.TryGetValue<string>(out var text) ? text : "";
+    string id = Text("Id"), name = Text("Name"), catalog = Text("Catalog");
+    return string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(catalog)
+      ? null : new JsonObject { ["Id"] = id, ["Name"] = name, ["Group"] = Text("Group"), ["Catalog"] = catalog };
+  }
+
+  private void ConfigureMaterialChoices()
+  {
+    if (_material.ControlObject is not System.Windows.Controls.ComboBox native) return;
+    if (!ReferenceEquals(_nativeMaterials, native))
+    {
+      _nativeMaterials = native;
+      _ordinaryMaterialBrush=native.Foreground;_ordinaryMaterialWeight=native.FontWeight;
+      native.ItemContainerGenerator.StatusChanged += (_, _) => RefreshMaterialItemStyles();
+      var basis = native.ItemContainerStyle ?? native.TryFindResource(typeof(System.Windows.Controls.ComboBoxItem)) as System.Windows.Style;
+      var style = new System.Windows.Style(typeof(System.Windows.Controls.ComboBoxItem), basis);
+      var linked = new System.Windows.Trigger { Property = System.Windows.FrameworkElement.TagProperty, Value = true };
+      linked.Setters.Add(new System.Windows.Setter(System.Windows.Controls.Control.FontWeightProperty, System.Windows.FontWeights.SemiBold));
+      style.Triggers.Add(linked);
+      var tint = new System.Windows.MultiTrigger();
+      tint.Conditions.Add(new System.Windows.Condition(System.Windows.FrameworkElement.TagProperty, true));
+      tint.Conditions.Add(new System.Windows.Condition(System.Windows.Controls.ComboBoxItem.IsHighlightedProperty, false));
+      tint.Conditions.Add(new System.Windows.Condition(System.Windows.Controls.ComboBoxItem.IsSelectedProperty, false));
+      tint.Setters.Add(new System.Windows.Setter(System.Windows.Controls.Control.ForegroundProperty, new System.Windows.DynamicResourceExtension(PatternSmithBrushKey)));
+      style.Triggers.Add(tint);
+      var inactive=new System.Windows.MultiTrigger();
+      inactive.Conditions.Add(new System.Windows.Condition(System.Windows.FrameworkElement.TagProperty,true));
+      inactive.Conditions.Add(new System.Windows.Condition(System.Windows.Controls.ComboBoxItem.IsHighlightedProperty,false));
+      inactive.Conditions.Add(new System.Windows.Condition(System.Windows.Controls.Primitives.Selector.IsSelectionActiveProperty,false));
+      inactive.Setters.Add(new System.Windows.Setter(System.Windows.Controls.Control.ForegroundProperty,new System.Windows.DynamicResourceExtension(PatternSmithBrushKey)));
+      style.Triggers.Add(inactive);
+      native.ItemContainerStyle = style;
+    }
+    RefreshMaterialItemStyles();
+  }
+
+  private void RefreshMaterialItemStyles()
+  {
+    if (_material.IsDisposed || _nativeMaterials == null || _nativeMaterials.ItemContainerGenerator.Status == System.Windows.Controls.Primitives.GeneratorStatus.GeneratingContainers) return;
+    var brush=MaterialAppearance.LinkedBrush();_nativeMaterials.Resources[PatternSmithBrushKey]=brush;
+    var names = _material.DataStore?.Cast<string>().ToArray() ?? Array.Empty<string>();
+    for (int index = 0; _nativeMaterials.ItemContainerGenerator.Status == System.Windows.Controls.Primitives.GeneratorStatus.ContainersGenerated && index < names.Length; index++)
+    {
+      if (_nativeMaterials.ItemContainerGenerator.ContainerFromIndex(index) is not System.Windows.Controls.ComboBoxItem item) continue;
+      var reference = _materials.TryGetValue(names[index], out var recipe) ? ReadPatternSmithReference(recipe["PatternSmith"]) : null;
+      item.Tag = reference != null;
+      item.ToolTip = reference == null ? "Custom material"
+        : $"PatternSmith: {reference["Name"]!.GetValue<string>()}\n{reference["Group"]!.GetValue<string>()}\nID: {reference["Id"]!.GetValue<string>()}";
+    }
+    bool selected=_materials.TryGetValue(_material.Text??"",out var current)&&ReadPatternSmithReference(current["PatternSmith"])!=null;
+    _nativeMaterials.SetCurrentValue(System.Windows.Controls.Control.ForegroundProperty,selected?brush:_ordinaryMaterialBrush);
+    _nativeMaterials.SetCurrentValue(System.Windows.Controls.Control.FontWeightProperty,selected?System.Windows.FontWeights.SemiBold:_ordinaryMaterialWeight);
   }
 
   private void RefreshMaterialChoices()

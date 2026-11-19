@@ -1,4 +1,4 @@
-# vObjectProperties+  ·  v26.11.4.1253
+# vObjectProperties+  ·  v26.11.16.1726
 
 vObjectProperties+ is a Rhino 8 and Rhino 9 plug-in that adds a per-document **Properties+** panel for inspecting and editing object geometry, attributes, annotation, rendering, and display settings.
 
@@ -10,6 +10,7 @@ vObjectProperties+ is a Rhino 8 and Rhino 9 plug-in that adds a per-document **P
 - Adds text font, height, alignment, style, and content controls for annotation objects.
 - Edits document-stored vNest settings and custom key/value fields for individual parts or multiple selected parts, with stable group/boundary identities, display-only part-name overrides, preserved grain guides and material recipes, and resizable editors. Part renaming leaves drawing labels and group names unchanged.
 - Reports occupied yardage and nested-copy counts for selected vNest tables in a material/table tree, with totals on expandable material parents and outline previews for selected materials or individual tables. Label tabs and unused stock tails do not contribute to yardage.
+- Controls selected-table ruler ticks, sizes, units, grid and cursor readouts supplied by vTools. vTools owns the temporary display and saved options, so rulers remain available with Properties+ closed. Existing panel ruler preferences migrate once.
 - Edits picture image, brightness, contrast, saturation, sharpness, transparency, alpha, and color-mask settings from either the selected-object properties or a document-wide Background images panel, using Rhino value-in-slider controls, named hide/show for contained objects, and native-image or two-point calibrated scaling that can include contained objects.
 - Exposes custom render-mesh settings, shadow controls, and surface isocurve density.
 - Offers a SelSame launcher when the vTools `vSelSame` command is available; matching, part-name lookup, and checked-criteria previews are handled by vTools.

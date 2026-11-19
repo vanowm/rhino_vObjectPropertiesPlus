@@ -30,6 +30,7 @@ internal static class PartDataTargets
 
   private static bool IsTableDecoration(RhinoObject obj) =>
     obj.Attributes.GetUserString("vNest.role") is "table-border" or "table-label" or "table-label-frame"
+      or "table-label-divider" or "table-material-frame" or "table-header-fill"
     || obj.Attributes.Name == "NestTable";
 
   internal static IReadOnlyList<PartDataTarget> Resolve(RhinoDoc doc, IReadOnlyList<RhinoObject> selection)

@@ -7,6 +7,8 @@ namespace vObjectPropertiesPlus.Helpers;
 
 internal static class PartDataStore
 {
+  // Part-setting defaults. Cutting side never mirrors the drawing geometry.
+  internal const bool DefaultFaceDown = false; // true cuts material face down; false cuts face up, including records saved before this option existed.
   internal const string NestSection = "vNest.PartSettings";
   internal const string CustomSection = "vObjectPropertiesPlus.PartData";
   internal const string NamesSection = "vTools.PartNames";
@@ -19,7 +21,7 @@ internal static class PartDataStore
 
   internal static JsonObject Defaults() => new()
   {
-    ["Version"] = SchemaVersion, ["Copies"] = 1, ["Included"] = true,
+    ["Version"] = SchemaVersion, ["Copies"] = 1, ["Included"] = true, ["FaceDown"] = DefaultFaceDown,
     ["Fixed"] = false, ["ManualRotation"] = false, ["Flipped"] = false,
     ["Flip"] = null, ["Grain"] = null, ["Rotation"] = null, ["Step"] = null,
     ["Obey"] = null, ["Reverse"] = null, ["Deviation"] = null,
@@ -36,6 +38,7 @@ internal static class PartDataStore
       throw new InvalidOperationException("The saved nesting record is too large.");
     var data = JsonNode.Parse(json) as JsonObject
       ?? throw new InvalidOperationException("The nesting record is not a JSON object.");
+    if (!data.ContainsKey("FaceDown")) data["FaceDown"] = DefaultFaceDown;
     ValidateNest(data);
     return data;
   }
@@ -108,6 +111,7 @@ internal static class PartDataStore
     Range(Integer(data, "Table"), 0, MaximumTables - 1, "Table");
     foreach (string key in new[] { "Included", "Fixed", "ManualRotation", "Flipped" })
       Boolean(data, key, false);
+    if (data.ContainsKey("FaceDown")) Boolean(data, "FaceDown", false);
     foreach (string key in new[] { "Flip", "Obey", "Reverse" })
       Boolean(data, key, true);
     foreach (string key in new[] { "Angle", "X", "Y" })
