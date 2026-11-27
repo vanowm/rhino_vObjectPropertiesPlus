@@ -2705,7 +2705,7 @@ internal sealed class PictureEditorControl : Panel
   private sealed class PictureHighlightConduit : DisplayConduit
   {
     private RhinoObject? _picture;
-    private System.Drawing.Color _color = System.Drawing.Color.Orange;
+    private System.Drawing.Color _color = InspectionHighlightPalette.Outline;
 
     internal Guid ObjectId => _picture?.Id ?? Guid.Empty;
 
@@ -2713,7 +2713,7 @@ internal sealed class PictureEditorControl : Panel
     {
       _picture = picture;
       _color = color.IsEmpty
-        ? System.Drawing.Color.Orange
+        ? InspectionHighlightPalette.Outline
         : System.Drawing.Color.FromArgb(255, color.R, color.G, color.B);
     }
 

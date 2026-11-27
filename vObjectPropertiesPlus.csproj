@@ -71,6 +71,9 @@
     <EmbeddedResource Include="..\icons\rhino_svgs\SelectByValue.svg">
       <LogicalName>vObjectPropertiesPlus.Icons.SelSame.svg</LogicalName>
     </EmbeddedResource>
+    <EmbeddedResource Include="..\icons\rhino_svgs\Mirror.svg">
+      <LogicalName>vObjectPropertiesPlus.Icons.FlipSide.svg</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
   <Target Name="CompileWin32Resources" BeforeTargets="CoreCompile">

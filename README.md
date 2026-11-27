@@ -1,4 +1,4 @@
-# vObjectProperties+  ·  v26.11.16.1726
+# vObjectProperties+  ·  v26.11.25.2017
 
 vObjectProperties+ is a Rhino 8 and Rhino 9 plug-in that adds a per-document **Properties+** panel for inspecting and editing object geometry, attributes, annotation, rendering, and display settings.
 
@@ -6,11 +6,14 @@ vObjectProperties+ is a Rhino 8 and Rhino 9 plug-in that adds a per-document **P
 
 - Reports context-sensitive geometry values such as length, total length, perimeter, radius, diameter, polygon sides, and document unit precision.
 - Edits common attributes across single or multiple selections, with mixed values shown as varying.
+- Enables, edits, detaches, reattaches, and removes allowances on selected curves in the **Seam** section, using vSeam for all operations.
 - Provides Name, Layer, Display Color, Display Mode, Linetype, Linetype Scale, Print Color, Print Width, Section Style, and Hyperlink controls.
 - Adds text font, height, alignment, style, and content controls for annotation objects.
-- Edits document-stored vNest settings and custom key/value fields for individual parts or multiple selected parts, with stable group/boundary identities, display-only part-name overrides, preserved grain guides and material recipes, and resizable editors. Part renaming leaves drawing labels and group names unchanged.
-- Reports occupied yardage and nested-copy counts for selected vNest tables in a material/table tree, with totals on expandable material parents and outline previews for selected materials or individual tables. Label tabs and unused stock tails do not contribute to yardage.
-- Controls selected-table ruler ticks, sizes, units, grid and cursor readouts supplied by vTools. vTools owns the temporary display and saved options, so rulers remain available with Properties+ closed. Existing panel ruler preferences migrate once.
+- Edits document-stored vNest settings and custom key/value fields for individual parts or multiple selected parts, with stable group/boundary identities, display-only part-name overrides, preserved grain guides and material recipes, and resizable editors. Use **Facing** and **Reinforcement** to mark parts for priority nesting. **Facing** inherits the boundary mark created by `vFacing` unless overridden. Part renaming leaves drawing labels and group names unchanged.
+- Builds every nesting editor from field descriptors. New scalar fields from vTools automatically get matching controls; the part list recognizes stored part identities and displays discovered part types.
+- Uses the vTools material-picker style when available, including linked PatternSmith colors and catalog tooltips. The material field still accepts custom names and works without vTools loaded.
+- Reports occupied yardage and nested-copy counts for selected vNest tables in a material/table tree, with totals on expandable material parents and outline previews for selected materials or individual tables. Yardage follows vTools' `vSettings` > `vNest` display options when available, otherwise it rounds up to the next tenth. Material totals add the measured lengths before rounding; label tabs and unused stock tails do not contribute.
+- Controls selected-table ruler ticks, sizes, units, grid, cursor readouts and optional **Ortho lines** supplied by vTools. vTools owns the temporary display and saved options, so rulers remain available with Properties+ closed. Existing panel ruler preferences migrate once.
 - Edits picture image, brightness, contrast, saturation, sharpness, transparency, alpha, and color-mask settings from either the selected-object properties or a document-wide Background images panel, using Rhino value-in-slider controls, named hide/show for contained objects, and native-image or two-point calibrated scaling that can include contained objects.
 - Exposes custom render-mesh settings, shadow controls, and surface isocurve density.
 - Offers a SelSame launcher when the vTools `vSelSame` command is available; matching, part-name lookup, and checked-criteria previews are handled by vTools.

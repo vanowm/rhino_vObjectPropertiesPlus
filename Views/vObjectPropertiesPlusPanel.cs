@@ -15,6 +15,7 @@ using Rhino.DocObjects;
 using Rhino.Geometry;
 using Rhino.Input;
 using Rhino.UI;
+using vObjectPropertiesPlus.Helpers;
 
 namespace vObjectPropertiesPlus.Views;
 
@@ -46,6 +47,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private const string PartDataEditorHeightKey = "Panel.PartDataEditorHeight";
   private const string NestTablesSectionCollapsedKey = "Panel.NestTablesSectionCollapsed";
   private const string NestTablesEditorHeightKey = "Panel.NestTablesEditorHeight";
+  private const string SeamSectionCollapsedKey = "Panel.SeamSectionCollapsed";
+  private const bool DefaultSeamSectionCollapsed = true; // true starts collapsed; false shows seam controls on the first curve selection.
 
   private readonly DropDown _typeDrop;
   private readonly TextBox _nameBox;
@@ -74,6 +77,9 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   private readonly PictureEditorControl _pictureEditor;
   private readonly PartDataEditorControl _partDataEditor;
   private readonly NestTableSummaryControl _nestTableSummary;
+  private readonly SeamEditorControl _seamEditor;
+  private readonly Panel _seamSection;
+  private bool _seamSectionCollapsed = DefaultSeamSectionCollapsed;
   private readonly Panel _partDataSection;
   private readonly Panel _nestTablesSection;
   private bool _partDataSectionCollapsed = true;
@@ -256,6 +262,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       () => SelectedRhinoObjects().ToList());
     _partDataEditor = new PartDataEditorControl(LoadPersistedEditorHeight(PartDataEditorHeightKey, 260, 120), LoadUiIcon);
     _nestTableSummary = new NestTableSummaryControl(LoadPersistedEditorHeight(NestTablesEditorHeightKey, 120, 70), LoadUiIcon("Edit"));
+    _seamEditor = new SeamEditorControl(LoadUiIcon("FlipSide"));
+    _seamEditor.SetCollapsed(_seamSectionCollapsed);
 
     SetButtonIcon(_displayColorButton, "Layer");
     SetButtonIcon(_printColorButton, "Display_Display_Panel");
@@ -567,10 +575,17 @@ public sealed class vObjectPropertiesPlusPanel : Panel
         _partDataEditor.SetActive(!value);
       }, _partDataEditor.ResizeTarget, _partDataEditor.ResizeTarget, PartDataEditorHeightKey, 120);
     _partDataSection.Visible = false;
+    _seamSection = CreateFlatSection("Seam", _seamEditor, () => _seamSectionCollapsed, value =>
+    {
+      SetSectionCollapsed(SeamSectionCollapsedKey, ref _seamSectionCollapsed, value);
+      _seamEditor.SetCollapsed(value);
+    });
+    _seamSection.Visible = false;
     _partDataEditor.TargetsChanged += (_, _) =>
     {
       _partDataSection.Visible = _partDataEditor.HasParts;
-      UpdatePartDataHighlight();
+      if (SyncPartDataHighlight())
+        _doc?.Views.Redraw();
     };
     _nestTablesSection = CreateFlatSection("Nest Tables", _nestTableSummary,
       () => _nestTablesSectionCollapsed,
@@ -622,6 +637,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
         _nativeDimensionLeaderPanelHost,
         _attributesSection,
         _partDataSection,
+        _seamSection,
         _pictureSection,
         _meshSection,
         _renderingSection,
@@ -2090,7 +2106,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     _groupHighlightConduit.Enabled = members.Count > 0 && !_groupHighlightSuspendedForTypeDropHover;
     _focusHighlightConduit.Enabled = group == null && _focusedObjectId != Guid.Empty
       && !_focusHighlightSuspendedForTypeDropHover;
-    if (wasHighlighting || _groupHighlightConduit.Enabled
+    bool partHighlightChanged = SyncPartDataHighlight();
+    if (partHighlightChanged || wasHighlighting || _groupHighlightConduit.Enabled
       || wasObjectHighlighting != _focusHighlightConduit.Enabled)
       _doc?.Views.Redraw();
   }
@@ -2105,17 +2122,25 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       _doc?.Views.Redraw();
   }
 
-  private void UpdatePartDataHighlight()
+  private bool SyncPartDataHighlight()
   {
-    bool wasHighlighting = _partDataHighlightConduit.Enabled;
-    var boundary = _panelLoaded ? _partDataEditor.FocusedPartBoundary : null;
-    if (boundary != null)
-      _partDataHighlightConduit.SetObject(boundary);
-    else
+    var boundary = _panelLoaded && _focusedObjectId == Guid.Empty && !_typeDropPreviewConduit.Enabled
+      && !_groupHighlightConduit.Enabled ? _partDataEditor.FocusedPartBoundary : null;
+    if (boundary == null)
+    {
+      if (!_partDataHighlightConduit.Enabled)
+        return false;
       _partDataHighlightConduit.Clear();
-    _partDataHighlightConduit.Enabled = boundary != null;
-    if (wasHighlighting || boundary != null)
-      _doc?.Views.Redraw();
+      _partDataHighlightConduit.Enabled = false;
+      return true;
+    }
+
+    if (_partDataHighlightConduit.Enabled && _partDataHighlightConduit.HasObject(boundary))
+      return false;
+
+    _partDataHighlightConduit.SetObject(boundary);
+    _partDataHighlightConduit.Enabled = true;
+    return true;
   }
 
   private static string BuildObjectDropLabel(RhinoObject obj, RhinoDoc? doc)
@@ -2393,6 +2418,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
     _hoveredTypeDropIndex = index;
     _typeDropPreviewConduit.Enabled = true;
+    SyncPartDataHighlight();
     _doc.Views.Redraw();
   }
 
@@ -2415,7 +2441,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       _groupHighlightSuspendedForTypeDropHover = false;
     }
 
-    if (redraw)
+    if (SyncPartDataHighlight() || redraw)
       _doc?.Views.Redraw();
   }
 
@@ -2424,10 +2450,17 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     if (_isUpdatingUi)
       return;
 
-    if (_previewGroupId != Guid.Empty)
-      _groupsDrop.SelectedIndex = 0;
-
     int idx = _typeDrop.SelectedIndex;
+    // Separator or out-of-range: snap back to summary, which triggers the restore path.
+    if (idx > 0 && (idx >= _typeDropMap.Count || _typeDropMap[idx] == null))
+    {
+      _typeDrop.SelectedIndex = 0;
+      return;
+    }
+
+    // The only group can already occupy row zero. Clear its preview explicitly.
+    bool wasPreviewingGroup = _previewGroupId != Guid.Empty;
+    _previewGroupId = Guid.Empty;
     if (idx <= 0 || _doc == null)
     {
       // Restore full selection view.
@@ -2441,16 +2474,11 @@ public sealed class vObjectPropertiesPlusPanel : Panel
           _selectedObjectIds.Add(o.Id);
         _focusHighlightConduit.Clear();
         _focusHighlightConduit.Enabled = false;
-        _doc?.Views.Redraw();
         UpdateFromSelection(_doc, _allSelectedObjects);
+        _doc?.Views.Redraw();
       }
-      return;
-    }
-
-    // Separator or out-of-range: snap back to summary, which triggers the restore path.
-    if (idx >= _typeDropMap.Count || _typeDropMap[idx] == null)
-    {
-      _typeDrop.SelectedIndex = 0;
+      else if (wasPreviewingGroup)
+        UpdateGroupDropdown(_doc);
       return;
     }
 
@@ -2471,8 +2499,6 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       // Highlight only the specific segment curve
       _focusHighlightConduit.SetSegment(segment.ParentObject, segment.Curve);
       _focusHighlightConduit.Enabled = true;
-      _doc.Views.Redraw();
-      
       // Refresh panel for this segment, but keep all segments in dropdown
       var fullCurveInfos = GetInfoCurvesForSelection(_allSelectedObjects, out _);
       RefreshForSegmentSelection(fullCurveInfos, segment.SegmentIndex);
@@ -2488,14 +2514,14 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       _selectedObjectIds.Clear();
       _selectedObjectIds.Add(focused.Id);
 
-      // Show orange highlight on focused object via conduit (selection unchanged).
+      // Highlight the focused object without changing Rhino's selection.
       _focusHighlightConduit.SetObject(focused);
       _focusHighlightConduit.Enabled = true;
-      _doc.Views.Redraw();
 
       // Refresh panel for just this one object.
       UpdateFromSelection(_doc, new[] { focused });
     }
+    _doc.Views.Redraw();
   }
 
   private static string LayerName(RhinoDoc? doc, int layerIndex)
@@ -2822,6 +2848,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
   {
     _partDataEditor.Update(doc, objects);
     _nestTableSummary.Update(doc, objects);
+    _seamSection.Visible = _seamEditor.Update(doc, objects);
   }
 
   private void UpdatePictureSection(IReadOnlyList<RhinoObject> objects)
@@ -5663,8 +5690,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
 
   private sealed class FocusHighlightConduit : DisplayConduit
   {
-    private static readonly System.Drawing.Color HighlightColor =
-      System.Drawing.Color.FromArgb(255, 235, 130, 20);
+    private static readonly System.Drawing.Color HighlightColor = InspectionHighlightPalette.Outline;
 
     private RhinoObject? _obj;
     private Curve? _segmentCurve;
@@ -5672,6 +5698,8 @@ public sealed class vObjectPropertiesPlusPanel : Panel
     private uint _selectedObjectsDocSerial;
     private readonly Rhino.Display.DisplayMaterial _surfaceHighlightMaterial =
       new(HighlightColor, 0.15);
+
+    public bool HasObject(RhinoObject obj) => _obj?.RuntimeSerialNumber == obj.RuntimeSerialNumber;
 
     public void SetObject(RhinoObject obj) 
     {
@@ -5798,7 +5826,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       if (_segments.Count == 0)
         return;
 
-      var color = System.Drawing.Color.FromArgb(255, 230, 140, 20);
+      var color = InspectionHighlightPalette.Outline;
       foreach (var segment in _segments)
         e.Display.DrawLine(segment.From, segment.To, color, 3);
     }
@@ -6574,6 +6602,7 @@ public sealed class vObjectPropertiesPlusPanel : Panel
       _isocurveSectionCollapsed = settings.GetBool(IsocurveSectionCollapsedKey, false);
       _partDataSectionCollapsed = settings.GetBool(PartDataSectionCollapsedKey, true);
       _nestTablesSectionCollapsed = settings.GetBool(NestTablesSectionCollapsedKey, false);
+      _seamSectionCollapsed = settings.GetBool(SeamSectionCollapsedKey, DefaultSeamSectionCollapsed);
     }
     catch (Exception ex)
     {

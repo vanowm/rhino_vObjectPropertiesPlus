@@ -19,6 +19,36 @@ internal static class MaterialAppearance
       return new SolidColorBrush(Color.FromArgb(color.A,color.R,color.G,color.B));
     return FallbackLinkedBrush;
   }
+  internal static Action? TryAttachPicker(Eto.Forms.ListControl control,Func<int,string?> linked,Func<string?> selected)
+  {
+    try
+    {
+      var assembly=AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(item=>item.GetName().Name=="vTools");
+      var method=assembly?.GetType("vTools.MaterialAppearance")?.GetMethod("AttachPicker",BindingFlags.Static|BindingFlags.NonPublic,
+        null,[typeof(Eto.Forms.ListControl),typeof(Func<int,string>),typeof(Func<string>)],null);
+      return method?.Invoke(null,[control,linked,selected]) as Action;
+    }
+    catch(Exception ex)
+    {
+      Log.Write("PartData",$"Shared material picker unavailable: {ex.GetBaseException().Message}");
+      return null;
+    }
+  }
+  internal static Eto.Forms.Button? TryCreateManagerButton(Action open)
+  {
+    try
+    {
+      var assembly=AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(item=>item.GetName().Name=="vTools");
+      var method=assembly?.GetType("vTools.MaterialAppearance")?.GetMethod("ManagerButton",BindingFlags.Static|BindingFlags.NonPublic,
+        null,[typeof(Action)],null);
+      return method?.Invoke(null,[open]) as Eto.Forms.Button;
+    }
+    catch(Exception ex)
+    {
+      Log.Write("PartData",$"Shared material manager button unavailable: {ex.GetBaseException().Message}");
+      return null;
+    }
+  }
   internal static void Grid(Eto.Forms.Control control,int column,Func<object?,bool> linked)
   {
     void Install()

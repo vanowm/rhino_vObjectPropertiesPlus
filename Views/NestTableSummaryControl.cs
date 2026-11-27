@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Reflection;
+using System.Text.Json;
 using Eto.Drawing;
 using Eto.Forms;
 using Rhino;
@@ -30,14 +32,30 @@ internal sealed class NestTableSummaryControl : Panel
   private readonly Button _editAllButton;
   private readonly Label _editError = new() { Visible = false, Wrap = WrapMode.Word, TextColor = Color.FromArgb(175, 40, 35) };
   private Func<RhinoDoc, Guid[], bool>? _editPlacedTables;
+  private Func<double, CultureInfo, string?>? _formatTableYards;
+  private System.Reflection.EventInfo? _yardageDisplayChanged;
   private TreeGridItem _treeRoot = new();
   private readonly HashSet<string> _collapsedMaterials = new(StringComparer.OrdinalIgnoreCase);
   private readonly TableHighlightConduit _tableHighlight = new();
   private readonly Dictionary<Guid, RhinoObject> _tableBorders = new();
   private readonly CheckBox _rulerTicks, _rulerSizes, _rulerGrid, _rulerCursor, _rulerInches, _rulerFeet, _rulerYards;
+  private readonly CheckBox _cursorOrthoLines = new() { Text = "Ortho lines", Visible = false,
+    ToolTip = "Show table-aligned cursor guides inside the material boundary" };
   private readonly StackLayout _rulerOptions;
+  private readonly StackLayout _legacyRulerOptions;
+  private readonly StackLayout _discoveredRulerOptions = new() { Spacing = 2, Visible = false };
+  private sealed record TableDisplayField(string Key, string Label, int Row, string Tip, bool? Value, bool Enabled, string[]? StateLabels);
+  private readonly Dictionary<string, CheckBox> _tableDisplayControls = new(StringComparer.Ordinal);
+  private readonly Dictionary<string, bool?> _tableDisplayValues = new(StringComparer.Ordinal);
+  private string _tableDisplaySchema = "";
+  private Func<string>? _getTableDisplay;
+  private Action<string, bool?>? _setTableDisplay;
+  private EventInfo? _tableDisplayChanged;
   private Func<bool?[]>? _getRulerOptions;
   private Action<bool, bool, bool, bool, bool, bool?, bool, bool>? _setRulerOptions;
+  private Func<bool>? _getCursorOrthoLines;
+  private Action<bool>? _setCursorOrthoLines;
+  private System.Reflection.EventInfo? _cursorOrthoLinesChanged;
   private bool _syncingRulers;
   private readonly bool _legacyRulerPreferences;
   private RhinoDoc? _doc;
@@ -63,15 +81,27 @@ internal sealed class NestTableSummaryControl : Panel
     _rulerGrid = RulerGridToggle();
     _rulerCursor = RulerToggle("Cursor", "NestTables.RulerCursor", DefaultRulerCursor);
     _rulerCursor.ToolTip = "Show cursor-position arrows and coordinates around the table";
+    _cursorOrthoLines.CheckedChanged += (_, _) =>
+    {
+      if (_syncingRulers || _setCursorOrthoLines == null) return;
+      try { _setCursorOrthoLines(_cursorOrthoLines.Checked == true); }
+      catch (Exception ex)
+      {
+        Log.Write("NestTables", $"Cannot save cursor ortho lines: {ex.Message}");
+        UpdateTableRulers();
+      }
+    };
     _rulerInches = RulerToggle("Inches", "NestTables.RulerInches", DefaultRulerInches);
     _rulerFeet = RulerToggle("Feet", "NestTables.RulerFeet", DefaultRulerFeet);
     _rulerYards = RulerToggle("Yards", "NestTables.RulerYards", DefaultRulerYards);
-    _rulerOptions = new StackLayout { Spacing = 2, Visible = false, Items =
+    _legacyRulerOptions = new StackLayout { Spacing = 2, Items =
     {
       new StackLayout { Orientation = Orientation.Horizontal, Spacing = 8, Items = { _rulerTicks, _rulerGrid } },
       new StackLayout { Orientation = Orientation.Horizontal, Spacing = 8, Items = { _rulerSizes, _rulerCursor } },
-      new StackLayout { Orientation = Orientation.Horizontal, Spacing = 8, Items = { _rulerInches, _rulerFeet, _rulerYards } }
+      new StackLayout { Orientation = Orientation.Horizontal, Spacing = 8, Items = { _rulerInches, _rulerFeet, _rulerYards } },
+      _cursorOrthoLines
     } };
+    _rulerOptions = new StackLayout { Spacing = 2, Visible = false, Items = { _legacyRulerOptions, _discoveredRulerOptions } };
     _tree = new TreeGridView { Height = height, Width = 10, ShowHeader = true,
       AllowMultipleSelection = true, AllowEmptySelection = true, GridLines = GridLines.Horizontal };
     _tree.LoadComplete += (_, _) =>
@@ -124,7 +154,7 @@ internal sealed class NestTableSummaryControl : Panel
 
   private void UpdateEditAvailability()
   {
-    if (_editPlacedTables == null)
+    if (_started && _editPlacedTables == null)
     {
       try
       {
@@ -132,12 +162,36 @@ internal sealed class NestTableSummaryControl : Panel
           ?.GetType("vTools.Commands.vNest");
         var method = type?.GetMethod("EditPlacedTables", new[] { typeof(RhinoDoc), typeof(Guid[]) });
         _editPlacedTables = method?.CreateDelegate<Func<RhinoDoc, Guid[], bool>>();
+        if (type != null && _formatTableYards == null) BindYardageDisplay(type);
       }
       catch (Exception ex) { Log.Write("NestTables", $"vNest table editor unavailable: {ex.Message}"); }
     }
     bool available = _editPlacedTables != null;
     _editColumn.Visible = _editAllButton.Visible = available;
     _editAllButton.Enabled = available && _started && HasTables && _doc != null && RhinoApp.InCommand == 0;
+  }
+
+  private void BindYardageDisplay(Type type)
+  {
+    var method = type.GetMethod("FormatTableYards", new[] { typeof(double), typeof(CultureInfo) });
+    var changed = type.GetEvent("TableYardageDisplayChanged");
+    if (method == null || changed == null) return;
+    try
+    {
+      var format = method.CreateDelegate<Func<double, CultureInfo, string?>>();
+      changed.AddEventHandler(null, (Action)OnYardageDisplayChanged);
+      _formatTableYards = format;
+      _yardageDisplayChanged = changed;
+      OnYardageDisplayChanged();
+    }
+    catch (Exception ex) { Log.Write("NestTables", $"vNest yardage display unavailable: {ex.Message}"); }
+  }
+
+  private void OnYardageDisplayChanged()
+  {
+    if (!HasTables) return;
+    _dirty = true;
+    QueueRefresh();
   }
 
   internal static IEnumerable<Guid> TableIdsForEdit(TreeGridItem root, DisplayRow? scope)
@@ -224,7 +278,7 @@ internal sealed class NestTableSummaryControl : Panel
 
   private bool EnsureTableRulerOptions()
   {
-    if (_getRulerOptions != null && _setRulerOptions != null) return true;
+    if (_getTableDisplay != null || _getRulerOptions != null && _setRulerOptions != null) return true;
     try
     {
       var assembly = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(item => item.GetName().Name == "vTools");
@@ -232,14 +286,19 @@ internal sealed class NestTableSummaryControl : Panel
       var read = type?.GetMethod("GetSelectedTableRulerOptions", Type.EmptyTypes);
       var update = type?.GetMethod("SetSelectedTableRulerOptions", new[] {
         typeof(bool), typeof(bool), typeof(bool), typeof(bool), typeof(bool), typeof(bool?), typeof(bool), typeof(bool) });
-      if (read == null || update == null) return false;
-      var get = read.CreateDelegate<Func<bool?[]>>();
-      var set = update.CreateDelegate<Action<bool, bool, bool, bool, bool, bool?, bool, bool>>();
-      if (_legacyRulerPreferences)
-        set(_rulerTicks.Checked == true, _rulerSizes.Checked == true, _rulerInches.Checked == true,
-          _rulerFeet.Checked == true, _rulerYards.Checked == true, _rulerGrid.Checked, _rulerCursor.Checked == true, true);
-      _getRulerOptions = get;
-      _setRulerOptions = set;
+      if (type == null) return false;
+      if (read != null && update != null)
+      {
+        var set = update.CreateDelegate<Action<bool, bool, bool, bool, bool, bool?, bool, bool>>();
+        if (_legacyRulerPreferences)
+          set(_rulerTicks.Checked == true, _rulerSizes.Checked == true, _rulerInches.Checked == true,
+            _rulerFeet.Checked == true, _rulerYards.Checked == true, _rulerGrid.Checked, _rulerCursor.Checked == true, true);
+        _getRulerOptions = read.CreateDelegate<Func<bool?[]>>();
+        _setRulerOptions = set;
+      }
+      if (BindTableDisplayCatalog(type)) return true;
+      if (_getRulerOptions == null) return false;
+      BindCursorOrthoLines(type);
       return true;
     }
     catch (Exception ex)
@@ -251,14 +310,118 @@ internal sealed class NestTableSummaryControl : Panel
     }
   }
 
+  private bool BindTableDisplayCatalog(Type type)
+  {
+    var read = type.GetMethod("GetSelectedTableDisplayOptions", Type.EmptyTypes);
+    var write = type.GetMethod("SetSelectedTableDisplayOption", new[] { typeof(string), typeof(bool?) });
+    var changed = type.GetEvent("TableDisplayOptionsChanged");
+    if (read == null || write == null || changed == null) return false;
+    var get = read.CreateDelegate<Func<string>>();
+    var set = write.CreateDelegate<Action<string, bool?>>();
+    changed.AddEventHandler(null, (Action)OnTableDisplayChanged);
+    _tableDisplayChanged = changed;
+    _getTableDisplay = get;
+    _setTableDisplay = set;
+    return true;
+  }
+
+  private void OnTableDisplayChanged()
+  {
+    if (_started && HasTables && !_syncingRulers) UpdateTableRulers();
+  }
+
+  private void RenderTableDisplayCatalog()
+  {
+    var fields = JsonSerializer.Deserialize<TableDisplayField[]>(_getTableDisplay!()) ?? [];
+    var schema = string.Join("\n", fields.Select(field => $"{field.Key}|{field.Label}|{field.Row}|{field.Tip}|{string.Join("|", field.StateLabels ?? [])}"));
+    bool syncing = _syncingRulers;
+    _syncingRulers = true;
+    try
+    {
+      if (schema != _tableDisplaySchema)
+      {
+        _discoveredRulerOptions.Items.Clear();
+        _tableDisplayControls.Clear();
+        _tableDisplayValues.Clear();
+        foreach (var row in fields.GroupBy(field => field.Row).OrderBy(row => row.Key))
+        {
+          var group = new StackLayout { Orientation = Orientation.Horizontal, Spacing = 8 };
+          foreach (var field in row)
+          {
+            var control = new CheckBox { Text = field.Label, ToolTip = field.Tip, ThreeState = field.StateLabels is { Length: 3 } };
+            void Save()
+            {
+              if (_syncingRulers || _setTableDisplay == null) return;
+              bool? before = _tableDisplayValues.GetValueOrDefault(field.Key);
+              bool? value = control.ThreeState ? before == false ? null : before == null : control.Checked;
+              try { _setTableDisplay(field.Key, value); }
+              catch (Exception ex) { Log.Write("NestTables", $"Cannot save table display setting {field.Key}: {ex.Message}"); }
+              UpdateTableRulers();
+            }
+            if (control.ThreeState && control.ControlObject is System.Windows.Controls.CheckBox native)
+              native.Click += (_, _) => Save();
+            else control.CheckedChanged += (_, _) => Save();
+            _tableDisplayControls.Add(field.Key, control);
+            group.Items.Add(control);
+          }
+          _discoveredRulerOptions.Items.Add(group);
+        }
+        _tableDisplaySchema = schema;
+      }
+      foreach (var field in fields)
+      {
+        var control = _tableDisplayControls[field.Key];
+        _tableDisplayValues[field.Key] = field.Value;
+        control.Checked = field.Value;
+        control.Enabled = field.Enabled;
+        control.Text = field.StateLabels is { Length: 3 } states ? states[field.Value == false ? 0 : field.Value == null ? 1 : 2] : field.Label;
+      }
+    }
+    finally { _syncingRulers = syncing; }
+  }
+
+  private void BindCursorOrthoLines(Type type)
+  {
+    var read = type.GetMethod("GetTableCursorOrthoLines", Type.EmptyTypes);
+    var write = type.GetMethod("SetTableCursorOrthoLines", new[] { typeof(bool) });
+    var changed = type.GetEvent("TableCursorOrthoLinesChanged");
+    if (read == null || write == null || changed == null) return;
+    try
+    {
+      var get = read.CreateDelegate<Func<bool>>();
+      var set = write.CreateDelegate<Action<bool>>();
+      changed.AddEventHandler(null, (Action<bool>)SyncCursorOrthoLines);
+      _getCursorOrthoLines = get;
+      _setCursorOrthoLines = set;
+      _cursorOrthoLinesChanged = changed;
+      _cursorOrthoLines.Visible = true;
+    }
+    catch (Exception ex) { Log.Write("NestTables", $"Cursor ortho lines unavailable: {ex.Message}"); }
+  }
+
+  private void SyncCursorOrthoLines(bool enabled)
+  {
+    bool wasSyncing = _syncingRulers;
+    _syncingRulers = true;
+    try { _cursorOrthoLines.Checked = enabled; }
+    finally { _syncingRulers = wasSyncing; }
+  }
+
   private void UpdateTableRulers()
   {
     bool available = _started && HasTables && EnsureTableRulerOptions();
     _rulerOptions.Visible = available;
+    _legacyRulerOptions.Visible = _getTableDisplay == null;
+    _discoveredRulerOptions.Visible = _getTableDisplay != null;
     if (available)
     {
       try
       {
+        if (_getTableDisplay != null)
+        {
+          RenderTableDisplayCatalog();
+          return;
+        }
         var options = _getRulerOptions!();
         if (options.Length != 7) throw new InvalidOperationException("Unexpected vNest ruler options.");
         _syncingRulers = true;
@@ -267,6 +430,7 @@ internal sealed class NestTableSummaryControl : Panel
           _rulerTicks.Checked = options[0]; _rulerSizes.Checked = options[1];
           _rulerInches.Checked = options[2]; _rulerFeet.Checked = options[3]; _rulerYards.Checked = options[4];
           _rulerGrid.Checked = options[5]; _rulerCursor.Checked = options[6];
+          if (_getCursorOrthoLines != null) SyncCursorOrthoLines(_getCursorOrthoLines());
         }
         finally { _syncingRulers = false; }
       }
@@ -300,7 +464,7 @@ internal sealed class NestTableSummaryControl : Panel
   internal bool HasTables { get; private set; }
   internal event EventHandler? TablesChanged;
 
-  internal static TreeGridItem BuildTree(IReadOnlyList<TableMetric> tables)
+  internal static TreeGridItem BuildTree(IReadOnlyList<TableMetric> tables, Func<double, CultureInfo, string?>? format = null)
   {
     var materials = new List<ITreeGridItem>();
     foreach (var material in tables.GroupBy(table => table.Material, StringComparer.OrdinalIgnoreCase)
@@ -310,9 +474,9 @@ internal sealed class NestTableSummaryControl : Panel
       double? yards = material.All(table => table.Yards.HasValue) ? material.Sum(table => table.Yards!.Value) : null;
       var children = material.OrderBy(table => table.Name, StringComparer.CurrentCultureIgnoreCase)
         .Select(table => new DisplayRow(table.Name, table.Parts?.ToString(CultureInfo.CurrentCulture) ?? "n/a",
-          YardText(table.Yards), false, table.Id){IsPatternSmith=table.IsPatternSmith})
+          YardText(table.Yards, format), false, table.Id){IsPatternSmith=table.IsPatternSmith})
         .Select(row => (ITreeGridItem)new TreeGridItem(new object[] { row.Table, row.Parts, row.Yards }) { Tag = row });
-      var total = new DisplayRow(material.Key, parts?.ToString(CultureInfo.CurrentCulture) ?? "n/a", YardText(yards), true)
+      var total = new DisplayRow(material.Key, parts?.ToString(CultureInfo.CurrentCulture) ?? "n/a", YardText(yards, format), true)
         {IsPatternSmith=material.Any(table=>table.IsPatternSmith)};
       materials.Add(new TreeGridItem(children, new object[] { total.Table, total.Parts, total.Yards })
         { Tag = total, Expanded = true });
@@ -337,7 +501,20 @@ internal sealed class NestTableSummaryControl : Panel
     else _collapsedMaterials.Add(row.Table);
   }
 
-  private static string YardText(double? yards) => yards?.ToString("0.###", CultureInfo.CurrentCulture) ?? "n/a";
+  private static string YardText(double? yards, Func<double, CultureInfo, string?>? format)
+  {
+    const int tenthsPerYard = 10;
+    if (yards is not double value || value < 0) return "n/a";
+    if (format != null) return format(value, CultureInfo.CurrentCulture) ?? "n/a";
+    double tenths = value * tenthsPerYard;
+    if (!double.IsFinite(tenths)) return "n/a";
+
+    // Match vNest: unit conversion can leave exact tenths just above their boundary.
+    double boundary = Math.Floor(tenths);
+    if (boundary > 0 && tenths <= Math.BitIncrement(Math.BitIncrement(boundary)))
+      tenths = boundary;
+    return (Math.Ceiling(tenths) / tenthsPerYard).ToString("0.0", CultureInfo.CurrentCulture);
+  }
 
   internal void Update(RhinoDoc? doc, IReadOnlyList<RhinoObject> selection)
   {
@@ -366,7 +543,7 @@ internal sealed class NestTableSummaryControl : Panel
     {
       _tableBorders.Clear();
       var tables = doc == null ? new List<TableMetric>() : ReadTables(doc, selection);
-      _treeRoot = BuildTree(tables);
+      _treeRoot = BuildTree(tables, _formatTableYards);
       foreach (var material in _treeRoot.Children.OfType<TreeGridItem>())
         if (material.Tag is DisplayRow row) material.Expanded = !_collapsedMaterials.Contains(row.Table);
       _tree.DataStore = _treeRoot;
@@ -657,6 +834,21 @@ internal sealed class NestTableSummaryControl : Panel
     DisposeTableRulers();
     if (!_started) return;
     _started = false;
+    _yardageDisplayChanged?.RemoveEventHandler(null, (Action)OnYardageDisplayChanged);
+    _yardageDisplayChanged = null;
+    _formatTableYards = null;
+    _editPlacedTables = null;
+    _tableDisplayChanged?.RemoveEventHandler(null, (Action)OnTableDisplayChanged);
+    _tableDisplayChanged = null;
+    _getTableDisplay = null;
+    _setTableDisplay = null;
+    _cursorOrthoLinesChanged?.RemoveEventHandler(null, (Action<bool>)SyncCursorOrthoLines);
+    _cursorOrthoLinesChanged = null;
+    _getCursorOrthoLines = null;
+    _setCursorOrthoLines = null;
+    _cursorOrthoLines.Visible = false;
+    _getRulerOptions = null;
+    _setRulerOptions = null;
     _editAllButton.Enabled = false;
     RhinoDoc.AddRhinoObject -= OnObjectChanged; RhinoDoc.DeleteRhinoObject -= OnObjectChanged;
     RhinoDoc.UndeleteRhinoObject -= OnObjectChanged; RhinoDoc.ReplaceRhinoObject -= OnObjectReplaced;
@@ -718,7 +910,7 @@ internal sealed class NestTableSummaryControl : Panel
       if (_documentSerial == 0 || _documentSerial != e.RhinoDoc?.RuntimeSerialNumber) return;
       foreach (var border in _borders)
         if (!border.IsDeleted && !border.IsHidden && border.Geometry is Curve curve)
-          e.Display.DrawCurve(curve, System.Drawing.Color.FromArgb(255, 235, 130, 20), 3);
+          e.Display.DrawCurve(curve, InspectionHighlightPalette.Outline, 3);
     }
   }
 }

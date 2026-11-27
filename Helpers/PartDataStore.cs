@@ -9,10 +9,13 @@ internal static class PartDataStore
 {
   // Part-setting defaults. Cutting side never mirrors the drawing geometry.
   internal const bool DefaultFaceDown = false; // true cuts material face down; false cuts face up, including records saved before this option existed.
+  internal const bool DefaultReinforcement = false; // True marks a reinforcement for vNest priority; old records are unmarked.
   internal const string NestSection = "vNest.PartSettings";
   internal const string CustomSection = "vObjectPropertiesPlus.PartData";
   internal const string NamesSection = "vTools.PartNames";
   internal const int SchemaVersion = 1;
+  internal const string FacingOverrideKey = "FacingOverride"; // Null inherits the source boundary's Facing mark.
+  internal const string ReinforcementKey = "Reinforcement"; // Shared Boolean mark in the vNest part record.
   internal const int MaximumNestCharacters = 16384;
   internal const int MaximumCustomCharacters = 1048576;
   internal const int MaximumCopies = 1000;
@@ -22,6 +25,7 @@ internal static class PartDataStore
   internal static JsonObject Defaults() => new()
   {
     ["Version"] = SchemaVersion, ["Copies"] = 1, ["Included"] = true, ["FaceDown"] = DefaultFaceDown,
+    [ReinforcementKey] = DefaultReinforcement,
     ["Fixed"] = false, ["ManualRotation"] = false, ["Flipped"] = false,
     ["Flip"] = null, ["Grain"] = null, ["Rotation"] = null, ["Step"] = null,
     ["Obey"] = null, ["Reverse"] = null, ["Deviation"] = null,
@@ -39,6 +43,7 @@ internal static class PartDataStore
     var data = JsonNode.Parse(json) as JsonObject
       ?? throw new InvalidOperationException("The nesting record is not a JSON object.");
     if (!data.ContainsKey("FaceDown")) data["FaceDown"] = DefaultFaceDown;
+    if (!data.ContainsKey(ReinforcementKey)) data[ReinforcementKey] = DefaultReinforcement;
     ValidateNest(data);
     return data;
   }
@@ -112,7 +117,8 @@ internal static class PartDataStore
     foreach (string key in new[] { "Included", "Fixed", "ManualRotation", "Flipped" })
       Boolean(data, key, false);
     if (data.ContainsKey("FaceDown")) Boolean(data, "FaceDown", false);
-    foreach (string key in new[] { "Flip", "Obey", "Reverse" })
+    if (data.ContainsKey(ReinforcementKey)) Boolean(data, ReinforcementKey, false);
+    foreach (string key in new[] { "Flip", "Obey", "Reverse", FacingOverrideKey })
       Boolean(data, key, true);
     foreach (string key in new[] { "Angle", "X", "Y" })
     {
@@ -218,7 +224,7 @@ internal static class PartDataStore
       && double.IsFinite(value);
 
   internal static bool Write(RhinoDoc doc, IReadOnlyList<string> keys, bool custom,
-    Action<JsonObject> edit, string description)
+    Action<string, JsonObject> edit, string description)
   {
     if (RhinoApp.InCommand > 0)
       throw new InvalidOperationException("Finish the current Rhino command before editing part data.");
@@ -229,7 +235,7 @@ internal static class PartDataStore
       string? raw = doc.Strings.GetValue(section, key);
       var data = custom ? ReadCustom(raw) : ReadNest(raw);
       string before = data.ToJsonString();
-      edit(data);
+      edit(key, data);
       if (custom)
         ReadCustom(data.ToJsonString());
       else
